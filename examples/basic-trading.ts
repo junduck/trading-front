@@ -43,7 +43,12 @@ async function main() {
   });
 
   // Create agent
-  const agent = new TradingBot(dataProvider, tradeProvider, ["AAPL", "GOOGL"]);
+  const agent = new TradingBot(
+    dataProvider,
+    tradeProvider,
+    undefined,
+    ["AAPL", "GOOGL"]
+  );
 
   // Add logger as global preRoute middleware
   agent.use(logger());
@@ -52,7 +57,7 @@ async function main() {
   let aaplQuantity = 0;
 
   // Route 1: Listen for AAPL market events
-  agent.market("AAPL", async (ctx) => {
+  agent.market({ symbol: "AAPL" }, async (ctx) => {
     // Get current AAPL quantity from closure (cross-event state)
     const aaplQty = aaplQuantity;
 
@@ -96,7 +101,7 @@ async function main() {
           created: new Date(),
         };
 
-        ctx.createOrder(order);
+        ctx.submitOrder(order);
       }
     } else {
       // Holding long AAPL -> Sell all
@@ -115,12 +120,12 @@ async function main() {
         created: new Date(),
       };
 
-      ctx.createOrder(order);
+      ctx.submitOrder(order);
     }
   });
 
   // Route 2: Track position updates from order fills
-  agent.order("FILLED", async (ctx) => {
+  agent.order({ status: "FILLED" }, async (ctx) => {
     const state = ctx.event.state;
     if (!state || state.symbol !== "AAPL") return;
 

@@ -14,14 +14,13 @@ import type { TradeProvider } from "../providers/TradeProvider.js";
 import type { NewsProvider } from "../providers/NewsProvider.js";
 import {
   Router,
-  type MarketFilter,
-  type OrderFilter,
-  type NewsFilter,
+  type MarketRouteOptions,
+  type OrderRouteOptions,
+  type NewsRouteOptions,
 } from "./Router.js";
 import { compose, type Algorithm } from "./Algorithm.js";
 import { orderHandlerMiddleware } from "./OrderHandler.js";
 import { Context } from "./Context.js";
-import type { OrderStatus } from "@junduck/trading-core";
 import { defaultLogger, type Logger } from "./Logger.js";
 import { TradingError } from "./TradingError.js";
 
@@ -95,47 +94,65 @@ export class TradingBot {
   }
 
   /**
-   * Route market events with optional symbol(s) or custom filter.
+   * Route market events with optional filtering.
    *
-   * @param filter - Symbol string, symbol array, or filter function (undefined = all events)
-   * @param middleware - Algorithm to execute
-   * @returns This agent for chaining
+   * @param options - Filter options
+   * @param strategy - Algorithm stack
    */
+  market(options: MarketRouteOptions, ...strategy: Algorithm<MarketEvent>[]): this;
+  /**
+   * Route market events without filtering.
+   *
+   * @param strategy - Algorithm stack
+   */
+  market(...strategy: Algorithm<MarketEvent>[]): this;
   market(
-    filter: string | string[] | MarketFilter | undefined,
-    ...middleware: Algorithm<MarketEvent>[]
+    optionsOrFirstAlgo?: MarketRouteOptions | Algorithm<MarketEvent>,
+    ...restStrategy: Algorithm<MarketEvent>[]
   ): this {
-    this.router.market(filter, ...middleware);
+    this.router.market(optionsOrFirstAlgo as any, ...restStrategy);
     return this;
   }
 
   /**
-   * Route order events with optional status filter or custom filter function.
+   * Route order events with optional filtering.
    *
-   * @param filter - OrderStatus, status array, or filter function (undefined = all events)
-   * @param middleware - Algorithm to execute
-   * @returns This agent for chaining
+   * @param options - Filter options
+   * @param strategy - Algorithm stack
    */
+  order(options: OrderRouteOptions, ...strategy: Algorithm<OrderEvent>[]): this;
+  /**
+   * Route order events without filtering.
+   *
+   * @param strategy - Algorithm stack
+   */
+  order(...strategy: Algorithm<OrderEvent>[]): this;
   order(
-    filter: OrderStatus | OrderStatus[] | OrderFilter | undefined,
-    ...middleware: Algorithm<OrderEvent>[]
+    optionsOrFirstAlgo?: OrderRouteOptions | Algorithm<OrderEvent>,
+    ...restStrategy: Algorithm<OrderEvent>[]
   ): this {
-    this.router.order(filter, ...middleware);
+    this.router.order(optionsOrFirstAlgo as any, ...restStrategy);
     return this;
   }
 
   /**
-   * Route news events with optional symbol(s) or custom filter.
+   * Route news events with optional filtering.
    *
-   * @param filter - Symbol string, symbol array, or filter function (undefined = all events)
-   * @param middleware - Algorithm to execute
-   * @returns This agent for chaining
+   * @param options - Filter options
+   * @param strategy - Algorithm stack
    */
+  news(options: NewsRouteOptions, ...strategy: Algorithm<NewsEvent>[]): this;
+  /**
+   * Route news events without filtering.
+   *
+   * @param strategy - Algorithm stack
+   */
+  news(...strategy: Algorithm<NewsEvent>[]): this;
   news(
-    filter: string | string[] | NewsFilter | undefined,
-    ...middleware: Algorithm<NewsEvent>[]
+    optionsOrFirstAlgo?: NewsRouteOptions | Algorithm<NewsEvent>,
+    ...restStrategy: Algorithm<NewsEvent>[]
   ): this {
-    this.router.news(filter, ...middleware);
+    this.router.news(optionsOrFirstAlgo as any, ...restStrategy);
     return this;
   }
 

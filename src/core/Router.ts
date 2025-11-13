@@ -23,6 +23,38 @@ export type OrderFilter = (state?: OrderEvent) => boolean;
 export type NewsFilter = (event: NewsEvent) => boolean;
 
 /**
+ * Options for filtering market events.
+ */
+export interface MarketRouteOptions {
+  /** Single symbol to filter */
+  symbol?: string;
+  /** Multiple symbols to filter */
+  symbols?: string[];
+  /** Custom filter function */
+  filter?: MarketFilter;
+}
+
+/**
+ * Options for filtering order events.
+ */
+export interface OrderRouteOptions {
+  /** Single status to filter */
+  status?: OrderStatus;
+  /** Multiple statuses to filter */
+  statuses?: OrderStatus[];
+  /** Custom filter function */
+  filter?: OrderFilter;
+}
+
+/**
+ * Options for filtering news events.
+ */
+export interface NewsRouteOptions {
+  /** Custom filter function */
+  filter?: NewsFilter;
+}
+
+/**
  * Route handler with optional filter.
  */
 interface RouteHandler<T extends Event> {
@@ -40,28 +72,45 @@ export class Router {
   private newsRoutes: RouteHandler<NewsEvent>[] = [];
 
   /**
-   * Route market events with optional symbol(s) or custom filter.
+   * Route market events with optional filtering.
    *
-   * @param filter - Symbol string, symbol array, or filter function (undefined = all events)
-   * @param strategy - Stack of algorithm executed as strategy
+   * @param options - Filter options
+   * @param strategy - Algorithm stack
    */
+  market(options: MarketRouteOptions, ...strategy: Strategy<MarketEvent>): this;
+  /**
+   * Route market events without filtering.
+   *
+   * @param strategy - Algorithm stack
+   */
+  market(...strategy: Strategy<MarketEvent>): this;
   market(
-    filter: string | string[] | MarketFilter | undefined,
-    ...strategy: Strategy<MarketEvent>
+    optionsOrFirstAlgo?: MarketRouteOptions | Strategy<MarketEvent>[0],
+    ...restStrategy: Strategy<MarketEvent>
   ): this {
-    const routeHandler: RouteHandler<MarketEvent> = { strategy };
+    let routeHandler: RouteHandler<MarketEvent>;
 
-    if (filter !== undefined) {
-      if (typeof filter === "string") {
-        const symbol = filter;
+    // Detect if first arg is options object or algorithm function
+    if (typeof optionsOrFirstAlgo === "function") {
+      // First arg is an algorithm function
+      routeHandler = {
+        strategy: [optionsOrFirstAlgo, ...restStrategy] as Strategy<MarketEvent>,
+      };
+    } else {
+      // First arg is options object (or undefined)
+      const options = (optionsOrFirstAlgo as MarketRouteOptions) ?? {};
+      routeHandler = { strategy: restStrategy };
+
+      if (options.filter !== undefined) {
+        routeHandler.filter = options.filter;
+      } else if (options.symbol !== undefined) {
+        const symbol = options.symbol;
         routeHandler.filter = (event: MarketEvent) =>
           event.marketData.some((item) => event.getSymbol(item) === symbol);
-      } else if (Array.isArray(filter)) {
-        const symbols = new Set(filter);
+      } else if (options.symbols !== undefined) {
+        const symbols = new Set(options.symbols);
         routeHandler.filter = (event: MarketEvent) =>
           event.marketData.some((item) => symbols.has(event.getSymbol(item)));
-      } else {
-        routeHandler.filter = filter;
       }
     }
 
@@ -70,28 +119,45 @@ export class Router {
   }
 
   /**
-   * Route order events with optional status filter or custom filter function.
+   * Route order events with optional filtering.
    *
-   * @param filter - OrderStatus, status array, or filter function (undefined = all events)
-   * @param strategy - Stack of algorithm executed as strategy
+   * @param options - Filter options
+   * @param strategy - Algorithm stack
    */
+  order(options: OrderRouteOptions, ...strategy: Strategy<OrderEvent>): this;
+  /**
+   * Route order events without filtering.
+   *
+   * @param strategy - Algorithm stack
+   */
+  order(...strategy: Strategy<OrderEvent>): this;
   order(
-    filter: OrderStatus | OrderStatus[] | OrderFilter | undefined,
-    ...strategy: Strategy<OrderEvent>
+    optionsOrFirstAlgo?: OrderRouteOptions | Strategy<OrderEvent>[0],
+    ...restStrategy: Strategy<OrderEvent>
   ): this {
-    const routeHandler: RouteHandler<OrderEvent> = { strategy };
+    let routeHandler: RouteHandler<OrderEvent>;
 
-    if (filter !== undefined) {
-      if (typeof filter === "string") {
-        const status = filter;
+    // Detect if first arg is options object or algorithm function
+    if (typeof optionsOrFirstAlgo === "function") {
+      // First arg is an algorithm function
+      routeHandler = {
+        strategy: [optionsOrFirstAlgo, ...restStrategy] as Strategy<OrderEvent>,
+      };
+    } else {
+      // First arg is options object (or undefined)
+      const options = (optionsOrFirstAlgo as OrderRouteOptions) ?? {};
+      routeHandler = { strategy: restStrategy };
+
+      if (options.filter !== undefined) {
+        routeHandler.filter = options.filter;
+      } else if (options.status !== undefined) {
+        const status = options.status;
         routeHandler.filter = (event: OrderEvent) =>
           event.state?.status === status;
-      } else if (Array.isArray(filter)) {
-        const statuses = new Set(filter);
+      } else if (options.statuses !== undefined) {
+        const statuses = new Set(options.statuses);
         routeHandler.filter = (event: OrderEvent) =>
           event.state?.status !== undefined && statuses.has(event.state.status);
-      } else {
-        routeHandler.filter = filter;
       }
     }
 
@@ -100,30 +166,37 @@ export class Router {
   }
 
   /**
-   * Route news events with optional symbol(s) or custom filter.
+   * Route news events with optional filtering.
    *
-   * @param filter - Symbol string, symbol array, or filter function (undefined = all events)
-   * @param strategy - Stack of algorithm executed as strategy
+   * @param options - Filter options
+   * @param strategy - Algorithm stack
    */
+  news(options: NewsRouteOptions, ...strategy: Strategy<NewsEvent>): this;
+  /**
+   * Route news events without filtering.
+   *
+   * @param strategy - Algorithm stack
+   */
+  news(...strategy: Strategy<NewsEvent>): this;
   news(
-    filter: string | string[] | NewsFilter | undefined,
-    ...strategy: Strategy<NewsEvent>
+    optionsOrFirstAlgo?: NewsRouteOptions | Strategy<NewsEvent>[0],
+    ...restStrategy: Strategy<NewsEvent>
   ): this {
-    const routeHandler: RouteHandler<NewsEvent> = { strategy };
+    let routeHandler: RouteHandler<NewsEvent>;
 
-    if (filter !== undefined) {
-      if (typeof filter === "string") {
-        const symbol = filter;
-        routeHandler.filter = (event: NewsEvent) =>
-          event.newsData.some((item) => event.getSymbols(item).includes(symbol));
-      } else if (Array.isArray(filter)) {
-        const symbols = new Set(filter);
-        routeHandler.filter = (event: NewsEvent) =>
-          event.newsData.some((item) =>
-            event.getSymbols(item).some((s) => symbols.has(s))
-          );
-      } else {
-        routeHandler.filter = filter;
+    // Detect if first arg is options object or algorithm function
+    if (typeof optionsOrFirstAlgo === "function") {
+      // First arg is an algorithm function
+      routeHandler = {
+        strategy: [optionsOrFirstAlgo, ...restStrategy] as Strategy<NewsEvent>,
+      };
+    } else {
+      // First arg is options object (or undefined)
+      const options = (optionsOrFirstAlgo as NewsRouteOptions) ?? {};
+      routeHandler = { strategy: restStrategy };
+
+      if (options.filter !== undefined) {
+        routeHandler.filter = options.filter;
       }
     }
 
@@ -184,6 +257,10 @@ export class Router {
    * Get total number of routes.
    */
   get size(): number {
-    return this.marketRoutes.length + this.orderRoutes.length + this.newsRoutes.length;
+    return (
+      this.marketRoutes.length +
+      this.orderRoutes.length +
+      this.newsRoutes.length
+    );
   }
 }

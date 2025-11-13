@@ -43,4 +43,11 @@ Thumbs.db
 
 # Agent configs
 .claude
-CLAUDE.md
+
+# Local dev memo
+/memo
+
+# Local planning documents
+task.md
+refactor.md
+plan*.md

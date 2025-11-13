@@ -1,0 +1,417 @@
+import {
+  type Position,
+  type MarketSnapshot,
+  applyFill,
+} from "@junduck/trading-core";
+import type {
+  Event,
+  MarketEvent,
+  OrderEvent,
+  NewsEvent,
+} from "../types/Events.js";
+import type { DataProvider } from "../providers/DataProvider.js";
+import type { TradeProvider } from "../providers/TradeProvider.js";
+import type { NewsProvider } from "../providers/NewsProvider.js";
+import {
+  Router,
+  type MarketFilter,
+  type OrderFilter,
+  type NewsFilter,
+} from "./Router.js";
+import { compose, type Algorithm } from "./Algorithm.js";
+import { orderHandlerMiddleware } from "./OrderHandler.js";
+import { Context } from "./Context.js";
+import type { OrderStatus } from "@junduck/trading-core";
+import { defaultLogger, type Logger } from "./Logger.js";
+import { TradingError } from "./TradingError.js";
+
+/**
+ * Event handler for agent events.
+ */
+export type AgentEventHandler<T = unknown> = (data: T) => void | Promise<void>;
+
+/**
+ * Main agent orchestrator implementing a Koa-style event loop.
+ *
+ * Mental model:
+ * - Request: {position, snapshot} from events
+ * - Response: pendingActions[] collected by middleware
+ * - Algorithm can await from dataProvider and tradeProvider
+ * - At the end of chain, pendingActions are executed (like res.body in Koa)
+ */
+export class TradingBot {
+  private readonly dataProvider: DataProvider;
+  private readonly tradeProvider: TradeProvider;
+  private readonly newsProvider?: NewsProvider | undefined;
+  private readonly router: Router;
+  private readonly preRoute: Algorithm<Event>[] = [];
+  private readonly logger: Logger;
+  private readonly symbols: string[];
+
+  private position: Position;
+  private snapshot: MarketSnapshot;
+  private running = false;
+
+  // Event emitter for agent-level events (one handler per event type)
+  private readonly eventHandlers: Map<string, AgentEventHandler> = new Map();
+
+  constructor(
+    dataProvider: DataProvider,
+    tradeProvider: TradeProvider,
+    newsProvider?: NewsProvider | undefined,
+    symbols?: string[],
+    initialSnapshot?: MarketSnapshot,
+    logger: Logger = defaultLogger
+  ) {
+    this.dataProvider = dataProvider;
+    this.tradeProvider = tradeProvider;
+    this.newsProvider = newsProvider;
+    this.symbols = symbols ?? [];
+    this.router = new Router();
+    this.logger = logger;
+
+    this.position = {
+      cash: 0,
+      totalCommission: 0,
+      realisedPnL: 0,
+      modified: new Date(),
+    };
+    this.snapshot = initialSnapshot ?? {
+      price: new Map(),
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Add global middleware applied to all events.
+   * Global middleware runs before route-specific middleware.
+   *
+   * @param middleware - Algorithm functions to add
+   * @returns This agent for chaining
+   */
+  use(...middleware: Algorithm<Event>[]): this {
+    this.preRoute.push(...middleware);
+    return this;
+  }
+
+  /**
+   * Route market events with optional symbol(s) or custom filter.
+   *
+   * @param filter - Symbol string, symbol array, or filter function (undefined = all events)
+   * @param middleware - Algorithm to execute
+   * @returns This agent for chaining
+   */
+  market(
+    filter: string | string[] | MarketFilter | undefined,
+    ...middleware: Algorithm<MarketEvent>[]
+  ): this {
+    this.router.market(filter, ...middleware);
+    return this;
+  }
+
+  /**
+   * Route order events with optional status filter or custom filter function.
+   *
+   * @param filter - OrderStatus, status array, or filter function (undefined = all events)
+   * @param middleware - Algorithm to execute
+   * @returns This agent for chaining
+   */
+  order(
+    filter: OrderStatus | OrderStatus[] | OrderFilter | undefined,
+    ...middleware: Algorithm<OrderEvent>[]
+  ): this {
+    this.router.order(filter, ...middleware);
+    return this;
+  }
+
+  /**
+   * Route news events with optional symbol(s) or custom filter.
+   *
+   * @param filter - Symbol string, symbol array, or filter function (undefined = all events)
+   * @param middleware - Algorithm to execute
+   * @returns This agent for chaining
+   */
+  news(
+    filter: string | string[] | NewsFilter | undefined,
+    ...middleware: Algorithm<NewsEvent>[]
+  ): this {
+    this.router.news(filter, ...middleware);
+    return this;
+  }
+
+  /**
+   * Start the agent event loop.
+   * Connects to data provider and trade provider, and begins processing events.
+   */
+  async start(): Promise<void> {
+    if (this.running) {
+      throw new Error("TradingBot is already running");
+    }
+
+    this.running = true;
+
+    const connections = [
+      this.dataProvider.connect(this.handleMarketEvent.bind(this)),
+      this.tradeProvider.connect(this.handlePositionEvent.bind(this)),
+    ];
+    if (this.newsProvider) {
+      connections.push(
+        this.newsProvider.connect(this.handleNewsEvent.bind(this))
+      );
+    }
+    await Promise.all(connections);
+
+    this.position = await this.tradeProvider.getPosition();
+
+    const subs = [
+      this.tradeProvider.subscribe(),
+      this.dataProvider.subscribeSymbols(this.symbols),
+    ];
+    if (this.newsProvider) {
+      subs.push(this.newsProvider.subscribe());
+    }
+    await Promise.all(subs);
+
+    this.emit("started", undefined);
+
+    // TODO: Event loop performance optimization
+    // - Add event batching for high-frequency data
+    // - Implement event prioritization (fills before market data)
+    // - Add backpressure handling for slow middleware
+  }
+
+  /**
+   * Stop the agent event loop.
+   * Disconnects from data provider and trade provider, and stops processing events.
+   */
+  async stop(): Promise<void> {
+    if (!this.running) {
+      return;
+    }
+
+    this.running = false;
+
+    await this.dataProvider.unsubscribeSymbols(this.symbols);
+    this.tradeProvider.unsubscribe();
+
+    const disconnections = [
+      this.dataProvider.disconnect(),
+      this.tradeProvider.disconnect(),
+    ];
+
+    if (this.newsProvider) {
+      disconnections.push(this.newsProvider.disconnect());
+    }
+
+    await Promise.all(disconnections);
+
+    await this.emit("stopped", undefined);
+  }
+
+  /**
+   * Check if the agent is currently running.
+   */
+  isRunning(): boolean {
+    return this.running;
+  }
+
+  /**
+   * Get the current position state.
+   */
+  getPosition(): Position {
+    return this.position;
+  }
+
+  /**
+   * Get the current market snapshot.
+   */
+  getSnapshot(): MarketSnapshot {
+    return this.snapshot;
+  }
+
+  /**
+   * Subscribe to agent event (replaces existing handler).
+   *
+   * @param eventType - Event type ('started', 'stopped', 'event_processed', 'error_handled')
+   * @param handler - Event handler function
+   */
+  on<T = unknown>(eventType: string, handler: AgentEventHandler<T>): this {
+    this.eventHandlers.set(eventType, handler as AgentEventHandler);
+    return this;
+  }
+
+  /**
+   * Unsubscribe from agent event.
+   *
+   * @param eventType - Event type
+   */
+  off(eventType: string): this {
+    this.eventHandlers.delete(eventType);
+    return this;
+  }
+
+  /**
+   * Handle a market event from the data provider.
+   * Routes the event to appropriate middleware and executes the chain.
+   *
+   * @param event - Market event to process
+   */
+  private async handleMarketEvent(event: MarketEvent): Promise<void> {
+    this.updateSnapshot(event);
+    await this.handleEvent(event);
+  }
+
+  /**
+   * Handle an order event from the trade provider.
+   * Routes the event to appropriate middleware and executes the chain.
+   *
+   * @param event - Order event to process
+   */
+  private async handlePositionEvent(event: OrderEvent): Promise<void> {
+    this.updatePosition(event);
+    await this.handleEvent(event);
+  }
+
+  /**
+   * Handle a news event from the news provider.
+   * Routes the event to appropriate middleware and executes the chain.
+   *
+   * @param event - News event to process
+   */
+  private async handleNewsEvent(event: NewsEvent): Promise<void> {
+    await this.handleEvent(event);
+  }
+
+  /**
+   * Handle an event (from data provider or trade provider).
+   * Routes the event to appropriate middleware and executes the chain.
+   *
+   * @param event - Event to process
+   */
+  private async handleEvent(event: Event): Promise<void> {
+    if (!this.running) {
+      return;
+    }
+
+    const matchedRoutes = this.router.match(event);
+
+    // Execute each route as an atomic strategy with its own context
+    for (const routeAlgorithms of matchedRoutes) {
+      try {
+        const routeContext = new Context({
+          event,
+          position: this.position,
+          snapshot: this.snapshot,
+          dataProvider: this.dataProvider,
+          tradeProvider: this.tradeProvider,
+          newsProvider: this.newsProvider,
+          logger: this.logger,
+        });
+
+        // Combine global pre-route middleware with this route's algorithms
+        // Pre-route middleware runs first, then route algorithms
+        const middleware = [...this.preRoute, ...routeAlgorithms];
+
+        const composedMiddleware = compose(middleware);
+        await composedMiddleware(routeContext, async () => {});
+
+        // Process pending actions for this route
+        // Each route's actions are executed independently
+        await orderHandlerMiddleware(routeContext);
+      } catch (error) {
+        // Enforce TradingError-only contract
+        if (!(error instanceof TradingError)) {
+          // Contract violation: just rethrow, don't cover up user's mistake
+          throw error;
+        }
+
+        this.logger.error(error.toJSON());
+
+        // Execute control flow based on error severity
+        switch (error.severity) {
+          case "recover":
+            // Log and continue processing next events
+            // Pending is dropped due to end of call chain
+            break;
+
+          case "cancel":
+            await this.tradeProvider.cancelAllOrders();
+            break;
+
+          case "halt":
+            // Cancel all open orders, disconnect, exit gracefully
+            await this.tradeProvider.cancelAllOrders();
+            await this.stop();
+            throw error;
+
+          case "fatal":
+            // Immediate termination
+            await this.stop();
+            throw error;
+        }
+
+        // Emit event for user-defined error handling
+        // User context is limited - they can't interfere with control flow
+        await this.emit("error_handled", error);
+      }
+    }
+
+    await this.emit("event_processed", event);
+  }
+
+  /**
+   * Update snapshot from market event.
+   *
+   * @param event - Market event
+   */
+  private updateSnapshot(event: MarketEvent): void {
+    for (const data of event.marketData) {
+      const price = event.getPrice(data);
+      const symbol = event.getSymbol(data);
+      this.snapshot.price.set(symbol, price);
+    }
+    this.snapshot.timestamp = event.timestamp;
+  }
+
+  /**
+   * Update position from order event.
+   *
+   * @param event - Order event
+   */
+  private updatePosition(event: OrderEvent): void {
+    if (!event.state) return;
+
+    const status = event.state.status;
+    if (status === "FILLED" || status === "PARTIAL") {
+      if (!event.execution) {
+        throw new Error(
+          `OrderEvent with status '${status}' must include execution data. ` +
+            `This indicates a provider bug. Order: ${JSON.stringify(
+              event.state
+            )}`
+        );
+      }
+      applyFill(this.position, event.execution);
+    }
+  }
+
+  /**
+   * Emit an agent event.
+   *
+   * @param eventType - Event type
+   * @param data - Event data
+   */
+  private async emit<T = unknown>(eventType: string, data: T): Promise<void> {
+    const handler = this.eventHandlers.get(eventType);
+    if (handler) {
+      try {
+        await Promise.resolve(handler(data));
+      } catch (error) {
+        console.error(
+          `Error in agent event handler for '${eventType}':`,
+          error
+        );
+      }
+    }
+  }
+}

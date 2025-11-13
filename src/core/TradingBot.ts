@@ -99,7 +99,10 @@ export class TradingBot {
    * @param options - Filter options
    * @param strategy - Algorithm stack
    */
-  market(options: MarketRouteOptions, ...strategy: Algorithm<MarketEvent>[]): this;
+  market(
+    options: MarketRouteOptions,
+    ...strategy: Algorithm<MarketEvent>[]
+  ): this;
   /**
    * Route market events without filtering.
    *
@@ -424,9 +427,8 @@ export class TradingBot {
       try {
         await Promise.resolve(handler(data));
       } catch (error) {
-        console.error(
-          `Error in agent event handler for '${eventType}':`,
-          error
+        this.logger.error(
+          `Error in agent event handler for '${eventType}': ${error}`
         );
       }
     }

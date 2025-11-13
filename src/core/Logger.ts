@@ -10,33 +10,21 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
  * Supports multiple log levels: debug, info, warn, error.
  */
 export interface Logger {
-  /**
-   * Log debug message (development/troubleshooting).
-   *
-   * @param message - Message object to log
-   */
-  debug(message: object): void;
+  /** Log debug message. */
+  debug(msg: string): void;
+  debug(obj: object, msg?: string): void;
 
-  /**
-   * Log info message (general information).
-   *
-   * @param message - Message object to log
-   */
-  info(message: object): void;
+  /** Log info message. */
+  info(msg: string): void;
+  info(obj: object, msg?: string): void;
 
-  /**
-   * Log warning message (non-critical issues).
-   *
-   * @param message - Message object to log
-   */
-  warn(message: object): void;
+  /** Log warning message. */
+  warn(msg: string): void;
+  warn(obj: object, msg?: string): void;
 
-  /**
-   * Log error message (critical failures).
-   *
-   * @param message - Message object to log
-   */
-  error(message: object): void;
+  /** Log error message. */
+  error(msg: string): void;
+  error(obj: object, msg?: string): void;
 }
 
 /**
@@ -45,7 +33,7 @@ export interface Logger {
 export const defaultLogger: Logger = (() => {
   const isDev = process.env["NODE_ENV"] !== "production";
 
-  const log = pino({
+  return pino({
     level: "debug",
     ...(isDev && {
       transport: {
@@ -58,11 +46,4 @@ export const defaultLogger: Logger = (() => {
       },
     }),
   });
-
-  return {
-    debug: (message: object) => log.debug(message),
-    info: (message: object) => log.info(message),
-    warn: (message: object) => log.warn(message),
-    error: (message: object) => log.error(message),
-  };
 })();

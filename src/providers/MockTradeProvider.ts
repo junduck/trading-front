@@ -200,11 +200,11 @@ export class MockTradeProvider extends TradeProvider {
     return this.submitOrder(newOrder);
   }
 
-  subscribe(): void {
+  async subscribe(): Promise<void> {
     this.subscribed = true;
   }
 
-  unsubscribe(): void {
+  async unsubscribe(): Promise<void> {
     this.subscribed = false;
   }
 

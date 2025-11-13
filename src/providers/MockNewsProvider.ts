@@ -96,6 +96,20 @@ export class MockNewsProvider extends NewsProvider {
     return items;
   }
 
+  async subscribe(): Promise<void> {
+    if (!this.connected) {
+      throw new Error("MockNewsProvider is not connected");
+    }
+    // Subscribe is handled by connect and auto-emit configuration
+  }
+
+  async unsubscribe(): Promise<void> {
+    if (!this.connected) {
+      throw new Error("MockNewsProvider is not connected");
+    }
+    this.stopAutoEmit();
+  }
+
   /** Manually emit a news event for testing */
   async emitNews(symbols?: string[]): Promise<void> {
     const targetSymbols = symbols ?? Array.from(this.subscribedSymbols);

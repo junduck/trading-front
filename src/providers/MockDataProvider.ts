@@ -148,41 +148,48 @@ export class MockDataProvider extends DataProvider {
       this.updatePrice(symbol);
     }
 
-    const event: MarketEvent<MarketQuote> = {
+    const event: MarketEvent = {
       type: "market",
-      getPrice: (item) => (item as MarketQuote).price,
-      getSymbol: (item) => (item as MarketQuote).symbol,
       timestamp: new Date(),
       marketData: quotes,
     };
 
     if (this.callback) {
-      this.callback(event as MarketEvent);
+      this.callback(event);
     }
   }
 
-  /** Manually emit a bar event for testing */
+  /** Manually emit a bar event for testing (converts bars to quotes) */
   async emitBar(symbols?: string[]): Promise<void> {
     const targetSymbols = symbols ?? Array.from(this.subscribedSymbols);
     if (targetSymbols.length === 0) return;
 
-    const bars: MarketBar[] = [];
+    const quotes: MarketQuote[] = [];
     for (const symbol of targetSymbols) {
       const barArray = await this.queryBar(symbol);
-      bars.push(...barArray);
+      // Convert bars to quotes using close price
+      for (const bar of barArray) {
+        quotes.push({
+          symbol: bar.symbol,
+          price: bar.close,
+          bid: bar.close * 0.9999,
+          ask: bar.close * 1.0001,
+          bidVol: Math.floor(bar.volume * 0.5),
+          askVol: Math.floor(bar.volume * 0.5),
+          timestamp: bar.timestamp,
+        });
+      }
       this.updatePrice(symbol);
     }
 
-    const event: MarketEvent<MarketBar> = {
+    const event: MarketEvent = {
       type: "market",
-      getPrice: (item) => (item as MarketBar).close,
-      getSymbol: (item) => (item as MarketBar).symbol,
       timestamp: new Date(),
-      marketData: bars,
+      marketData: quotes,
     };
 
     if (this.callback) {
-      this.callback(event as MarketEvent);
+      this.callback(event);
     }
   }
 

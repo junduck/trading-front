@@ -386,9 +386,7 @@ export class TradingBot {
    */
   private updateSnapshot(event: MarketEvent): void {
     for (const data of event.marketData) {
-      const price = event.getPrice(data);
-      const symbol = event.getSymbol(data);
-      this.snapshot.price.set(symbol, price);
+      this.snapshot.price.set(data.symbol, data.price);
     }
     this.snapshot.timestamp = event.timestamp;
   }

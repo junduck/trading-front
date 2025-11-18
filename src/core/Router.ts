@@ -106,11 +106,11 @@ export class Router {
       } else if (options.symbol !== undefined) {
         const symbol = options.symbol;
         routeHandler.filter = (event: MarketEvent) =>
-          event.marketData.some((item) => event.getSymbol(item) === symbol);
+          event.marketData.some((item) => item.symbol === symbol);
       } else if (options.symbols !== undefined) {
         const symbols = new Set(options.symbols);
         routeHandler.filter = (event: MarketEvent) =>
-          event.marketData.some((item) => symbols.has(event.getSymbol(item)));
+          event.marketData.some((item) => symbols.has(item.symbol));
       }
     }
 

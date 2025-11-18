@@ -1,4 +1,4 @@
-import type { Fill, OrderState } from "@junduck/trading-core";
+import type { Fill, MarketQuote, OrderState } from "@junduck/trading-core";
 import type { LiveNews } from "./News.js";
 
 /**
@@ -10,14 +10,11 @@ export interface BaseEvent {
 }
 
 /**
- * Market event with generic data array.
- * Uses getPrice and getSymbol getters to abstract data access.
+ * Market event
  */
-export interface MarketEvent<T = unknown> extends BaseEvent {
+export interface MarketEvent extends BaseEvent {
   type: "market";
-  getPrice: (item: T) => number;
-  getSymbol: (item: T) => string;
-  marketData: T[];
+  marketData: MarketQuote[];
 }
 
 export interface NewsEvent extends BaseEvent {

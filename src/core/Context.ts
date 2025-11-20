@@ -49,11 +49,12 @@ export interface PendingAction {
  * At the end of the middleware chain, pendingActions are executed
  * (similar to how Koa handles res.body).
  *
- * @template E - Event type for type-safe event access
+ * Event type is determined at runtime via router tag dispatch.
+ * Router ensures correct event type for each strategy.
  */
-export class Context<E extends Event = Event> {
-  /** Current event being processed (used for routing) */
-  readonly event: E;
+export class Context {
+  /** Current event being processed (type determined by router) */
+  readonly event: Event;
 
   /** Current position state (request) */
   readonly position: Position;
@@ -92,7 +93,7 @@ export class Context<E extends Event = Event> {
   private trackingIdCounter = 0;
 
   constructor(options: {
-    event: E;
+    event: Event;
     position: Position;
     snapshot: MarketSnapshot;
     dataProvider: DataProvider;

@@ -1,5 +1,4 @@
 import type { Context } from "./Context.js";
-import type { Event } from "../types/Events.js";
 import { TradingErrors } from "./TradingError.js";
 
 /**
@@ -11,29 +10,24 @@ export type Next = () => Promise<void>;
  * Algorithm function signature.
  * Receives a context and a next algorithm to continue the chain.
  *
- * @template E - Event type for type-safe event access
+ * Event type is determined at runtime via router tag dispatch.
+ * Use TypeScript type guards if you need to narrow event types.
  */
-export type Algorithm<E extends Event = Event> = (
-  ctx: Context<E>,
-  next: Next
-) => Promise<void>;
+export type Algorithm = (ctx: Context, next: Next) => Promise<void>;
 
 /**
  * A stack of algorithms composes a strategy for specific event
  */
-export type Strategy<E extends Event = Event> = Algorithm<E>[];
+export type Strategy = Algorithm[];
 
 /**
  * Compose multiple algorithms into a single algorithm function.
  * Executes algorithm in order, with each calling next() to continue.
  *
- * @template E - Event type for type-safe event access
  * @param strat - Array of algorithm to compose
  * @returns A single composed algorithm function
  */
-export function compose<E extends Event = Event>(
-  strat: Strategy<E>
-): Algorithm<E> {
+export function compose(strat: Strategy): Algorithm {
   // Composition-time validation errors (before event loop starts)
   // These are programming errors and should fail fast with standard Error
   if (!Array.isArray(strat)) {
@@ -46,7 +40,7 @@ export function compose<E extends Event = Event>(
     }
   }
 
-  return async (ctx: Context<E>, next: Next) => {
+  return async (ctx: Context, next: Next) => {
     let index = -1;
 
     const dispatch = async (i: number): Promise<void> => {

@@ -28,8 +28,7 @@ export type ErrorSeverity = "recover" | "cancel" | "halt" | "fatal";
 export type ErrorSource =
   | "algorithm" // User-defined algorithm
   | "system" // TradingBot internal
-  | "provider" // Data/Trade provider
-  | "validation"; // Order/action validation
+  | "provider"; // Data/Trade provider
 
 /**
  * Error category for semantic classification.
@@ -38,7 +37,6 @@ export type ErrorCategory =
   | "network" // Connection, timeout, network issues
   | "data" // Invalid/missing market data
   | "execution" // Order submission/modification failed
-  | "validation" // Parameter/state validation failed
   | "logic" // Algorithm logic error
   | "state" // Invalid state transition
   | "system"; // System-level error
@@ -187,53 +185,23 @@ export const TradingErrors = {
   },
 
   /**
-   * Validation error (order/action validation).
-   */
-  validation: (
-    message: string,
-    event: Event,
-    severity?: ErrorSeverity,
-    metadata?: Record<string, unknown>
-  ) => {
-    return new TradingError(
-      message,
-      severity ?? "recover",
-      "validation",
-      "validation",
-      event,
-      undefined,
-      metadata
-    );
-  },
-
-  /**
    * System error (TradingBot internal).
-   * Can accept either Event or options object with severity/category.
    */
   system: (
     message: string,
     event: Event,
-    severityOrOptions?:
-      | ErrorSeverity
-      | { severity?: ErrorSeverity; category?: ErrorCategory; cause?: Error },
-    category?: ErrorCategory
+    severity?: ErrorSeverity,
+    category?: ErrorCategory,
+    metadata?: Record<string, unknown>
   ) => {
-    // Handle both call signatures
-    let severity: ErrorSeverity = "fatal";
-    let cat: ErrorCategory = "system";
-    let metadata: Record<string, unknown> | undefined;
-
-    if (typeof severityOrOptions === "object" && severityOrOptions !== null) {
-      severity = severityOrOptions.severity ?? "fatal";
-      cat = severityOrOptions.category ?? "system";
-      if (severityOrOptions.cause) {
-        metadata = { cause: severityOrOptions.cause };
-      }
-    } else if (typeof severityOrOptions === "string") {
-      severity = severityOrOptions;
-      cat = category ?? "system";
-    }
-
-    return new TradingError(message, severity, "system", cat, event, undefined, metadata);
+    return new TradingError(
+      message,
+      severity ?? "fatal",
+      "system",
+      category ?? "system",
+      event,
+      undefined,
+      metadata
+    );
   },
 };

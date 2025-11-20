@@ -22,10 +22,10 @@ export interface MockTradeProviderConfig {
  */
 export class MockTradeProvider extends TradeProvider {
   private connected = false;
+  private running = false;
   private position: Position;
   private orders: Map<string, OrderState> = new Map();
   private callback: ((event: OrderEvent) => void) | undefined = undefined;
-  private subscribed = false;
   private nextOrderId = 1;
 
   private readonly orderLatency: number;
@@ -53,7 +53,9 @@ export class MockTradeProvider extends TradeProvider {
   }
 
   async disconnect(): Promise<void> {
+    await this.end();
     this.connected = false;
+    this.callback = undefined;
   }
 
   isConnected(): boolean {
@@ -172,6 +174,19 @@ export class MockTradeProvider extends TradeProvider {
     return count;
   }
 
+  emergencyCancel(): void {
+    // Panic button - fire and forget, never throw
+    if (!this.connected) return;
+
+    for (const orderState of this.orders.values()) {
+      if (orderState.status === "OPEN") {
+        orderState.status = "CANCELLED";
+        orderState.modified = new Date();
+        this.emitOrderEvent(orderState);
+      }
+    }
+  }
+
   async amendOrder(orderId: string, updates: Partial<Order>): Promise<Order> {
     if (!this.connected) {
       throw new Error("MockTradeProvider is not connected");
@@ -201,11 +216,21 @@ export class MockTradeProvider extends TradeProvider {
   }
 
   async subscribe(): Promise<void> {
-    this.subscribed = true;
+    // No-op for mock provider
   }
 
   async unsubscribe(): Promise<void> {
-    this.subscribed = false;
+    await this.end();
+  }
+
+  async begin(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+  }
+
+  async end(): Promise<void> {
+    if (!this.running) return;
+    this.running = false;
   }
 
   /** Manually set position for testing */
@@ -290,7 +315,7 @@ export class MockTradeProvider extends TradeProvider {
 
   /** Emit an order update event */
   private emitOrderEvent(orderState: OrderState, execution?: Fill): void {
-    if (!this.subscribed || !this.callback) return;
+    if (!this.running || !this.callback) return;
 
     const event: OrderEvent = {
       type: "order",

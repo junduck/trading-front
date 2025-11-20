@@ -17,6 +17,7 @@ export interface MockNewsProviderConfig {
  */
 export class MockNewsProvider extends NewsProvider {
   private connected = false;
+  private running = false;
   private callback: ((event: NewsEvent) => void) | undefined = undefined;
   private subscribedSymbols: Set<string> = new Set();
   private intervalId: NodeJS.Timeout | undefined = undefined;
@@ -33,15 +34,12 @@ export class MockNewsProvider extends NewsProvider {
   async connect(callback: (event: NewsEvent) => void): Promise<void> {
     this.callback = callback;
     this.connected = true;
-
-    if (this.autoEmit) {
-      this.startAutoEmit();
-    }
   }
 
   async disconnect(): Promise<void> {
+    await this.end();
     this.connected = false;
-    this.stopAutoEmit();
+    this.callback = undefined;
   }
 
   isConnected(): boolean {
@@ -96,17 +94,42 @@ export class MockNewsProvider extends NewsProvider {
     return items;
   }
 
-  async subscribe(): Promise<void> {
+  async subscribe(options?: unknown): Promise<void> {
     if (!this.connected) {
       throw new Error("MockNewsProvider is not connected");
     }
-    // Subscribe is handled by connect and auto-emit configuration
+    if (options && typeof options === 'object' && 'symbols' in options) {
+      const symbols = (options as { symbols: string[] }).symbols;
+      for (const symbol of symbols) {
+        this.subscribedSymbols.add(symbol);
+      }
+    }
   }
 
-  async unsubscribe(): Promise<void> {
-    if (!this.connected) {
-      throw new Error("MockNewsProvider is not connected");
+  async unsubscribe(options?: unknown): Promise<void> {
+    await this.end();
+    if (options && typeof options === 'object' && 'symbols' in options) {
+      const symbols = (options as { symbols: string[] }).symbols;
+      for (const symbol of symbols) {
+        this.subscribedSymbols.delete(symbol);
+      }
     }
+  }
+
+  async begin(): Promise<void> {
+    if (this.running) return;
+
+    this.running = true;
+
+    if (this.autoEmit) {
+      this.startAutoEmit();
+    }
+  }
+
+  async end(): Promise<void> {
+    if (!this.running) return;
+
+    this.running = false;
     this.stopAutoEmit();
   }
 
@@ -142,7 +165,9 @@ export class MockNewsProvider extends NewsProvider {
     if (this.intervalId) return;
 
     this.intervalId = setInterval(() => {
-      this.emitNews().catch((err) => console.error("Error in auto-emit:", err));
+      if (this.running) {
+        this.emitNews().catch((err) => console.error("Error in auto-emit:", err));
+      }
     }, this.emitInterval) as unknown as NodeJS.Timeout;
   }
 

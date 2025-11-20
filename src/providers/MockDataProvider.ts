@@ -20,6 +20,7 @@ export interface MockDataProviderConfig {
  */
 export class MockDataProvider extends DataProvider {
   private connected = false;
+  private running = false;
   private prices: Map<string, number> = new Map();
   private callback: ((event: MarketEvent) => void) | undefined = undefined;
   private subscribedSymbols: Set<string> = new Set();
@@ -45,15 +46,12 @@ export class MockDataProvider extends DataProvider {
   async connect(callback: (event: MarketEvent) => void): Promise<void> {
     this.callback = callback;
     this.connected = true;
-
-    if (this.autoEmit) {
-      this.startAutoEmit();
-    }
   }
 
   async disconnect(): Promise<void> {
+    await this.end();
     this.connected = false;
-    this.stopAutoEmit();
+    this.callback = undefined;
   }
 
   isConnected(): boolean {
@@ -128,6 +126,7 @@ export class MockDataProvider extends DataProvider {
   }
 
   async unsubscribe(options?: unknown): Promise<void> {
+    await this.end();
     // Provider-specific unsubscription logic
     // In this mock, we treat options as an object with symbols array
     if (options && typeof options === 'object' && 'symbols' in options) {
@@ -136,7 +135,24 @@ export class MockDataProvider extends DataProvider {
     }
   }
 
-  /** Manually emit a quote event for testing */
+  async begin(): Promise<void> {
+    if (this.running) return;
+
+    this.running = true;
+
+    if (this.autoEmit) {
+      this.startAutoEmit();
+    }
+  }
+
+  async end(): Promise<void> {
+    if (!this.running) return;
+
+    this.running = false;
+    this.stopAutoEmit();
+  }
+
+  /** Manually emit a quote event for testing (works even when not RUNNING) */
   async emitQuote(symbols?: string[]): Promise<void> {
     const targetSymbols = symbols ?? Array.from(this.subscribedSymbols);
     if (targetSymbols.length === 0) return;
@@ -215,9 +231,11 @@ export class MockDataProvider extends DataProvider {
     if (this.intervalId) return;
 
     this.intervalId = setInterval(() => {
-      this.emitQuote().catch((err) =>
-        console.error("Error in auto-emit:", err)
-      );
+      if (this.running) {
+        this.emitQuote().catch((err) =>
+          console.error("Error in auto-emit:", err)
+        );
+      }
     }, this.emitInterval) as unknown as NodeJS.Timeout;
   }
 

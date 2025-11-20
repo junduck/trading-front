@@ -1,49 +1,71 @@
-import pino from "pino";
+import pino, { type LoggerOptions as PinoOptions } from "pino";
+
+export type Logger = pino.Logger;
+export type LogLevel = pino.Level;
 
 /**
- * Log level for messages.
+ * Configuration options for creating a logger.
  */
-export type LogLevel = "debug" | "info" | "warn" | "error";
+export interface LoggerConfig {
+  /** Minimum log level (default: 'info' in production, 'debug' in development) */
+  level?: LogLevel;
 
-/**
- * Logger interface for middleware and system logging.
- * Supports multiple log levels: debug, info, warn, error.
- */
-export interface Logger {
-  /** Log debug message. */
-  debug(msg: string): void;
-  debug(obj: object, msg?: string): void;
+  /** Enable pretty printing for development (default: true in dev, false in production) */
+  pretty?: boolean;
 
-  /** Log info message. */
-  info(msg: string): void;
-  info(obj: object, msg?: string): void;
-
-  /** Log warning message. */
-  warn(msg: string): void;
-  warn(obj: object, msg?: string): void;
-
-  /** Log error message. */
-  error(msg: string): void;
-  error(obj: object, msg?: string): void;
+  /** Additional pino options for advanced configuration */
+  pinoOptions?: Omit<PinoOptions, "level">;
 }
 
 /**
- * Default pino logger implementation.
+ * Create a configured logger instance with standard serializers.
+ *
+ * @param config - Logger configuration options
+ * @returns Configured logger instance
+ *
+ * @example
+ * ```ts
+ * // Production logger with JSON output
+ * const logger = createLogger({ level: 'info', pretty: false });
+ *
+ * // Development logger with pretty output
+ * const logger = createLogger({ level: 'debug', pretty: true });
+ *
+ * // Child logger with context
+ * const botLogger = logger.child({ component: 'trading-bot' });
+ * ```
  */
-export const defaultLogger: Logger = (() => {
+export function createLogger(config: LoggerConfig = {}): Logger {
   const isDev = process.env["NODE_ENV"] !== "production";
 
-  return pino({
-    level: "debug",
-    ...(isDev && {
+  const level = config.level ?? (isDev ? "debug" : "info");
+  const pretty = config.pretty ?? isDev;
+
+  const options: PinoOptions = {
+    level,
+    serializers: {
+      err: pino.stdSerializers.err,
+      error: pino.stdSerializers.err,
+    },
+    ...(pretty && {
       transport: {
         target: "pino-pretty",
         options: {
           colorize: true,
           translateTime: "HH:MM:ss.l",
           ignore: "pid,hostname",
+          singleLine: false,
         },
       },
     }),
-  });
-})();
+    ...config.pinoOptions,
+  };
+
+  return pino(options);
+}
+
+/**
+ * Default logger instance for the library.
+ * Uses environment-based configuration.
+ */
+export const defaultLogger: Logger = createLogger();

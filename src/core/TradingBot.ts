@@ -54,20 +54,20 @@ export class TradingBot {
   // Event emitter for agent-level events (one handler per event type)
   private readonly eventHandlers: Map<string, AgentEventHandler> = new Map();
 
-  constructor(
-    dataProvider: DataProvider,
-    tradeProvider: TradeProvider,
-    newsProvider?: NewsProvider | undefined,
-    symbols?: string[],
-    initialSnapshot?: MarketSnapshot,
-    logger: Logger = defaultLogger
-  ) {
-    this.dataProvider = dataProvider;
-    this.tradeProvider = tradeProvider;
-    this.newsProvider = newsProvider;
-    this.symbols = symbols ?? [];
+  constructor(opts: {
+    dataProvider: DataProvider;
+    tradeProvider: TradeProvider;
+    newsProvider?: NewsProvider;
+    symbols?: string[];
+    initialSnapshot?: MarketSnapshot;
+    logger?: Logger;
+  }) {
+    this.dataProvider = opts.dataProvider;
+    this.tradeProvider = opts.tradeProvider;
+    this.newsProvider = opts.newsProvider;
+    this.symbols = opts.symbols ?? [];
     this.router = new Router();
-    this.logger = logger;
+    this.logger = opts.logger ?? defaultLogger;
 
     this.position = {
       cash: 0,
@@ -75,7 +75,7 @@ export class TradingBot {
       realisedPnL: 0,
       modified: new Date(),
     };
-    this.snapshot = initialSnapshot ?? {
+    this.snapshot = opts.initialSnapshot ?? {
       price: new Map(),
       timestamp: new Date(),
     };
@@ -333,6 +333,7 @@ export class TradingBot {
         this.logger.error(error.toJSON());
 
         // Execute control flow based on error severity
+        // Use emergencyCancel() for panic button - sync, never throws
         switch (error.severity) {
           case "recover":
             // Log and continue processing next events
@@ -340,12 +341,13 @@ export class TradingBot {
             break;
 
           case "cancel":
-            await this.tradeProvider.cancelAllOrders();
+            // Fire panic button - synchronous, never throws, best-effort
+            this.tradeProvider.emergencyCancel();
             break;
 
           case "halt":
-            // Cancel all open orders, disconnect, exit gracefully
-            await this.tradeProvider.cancelAllOrders();
+            // Fire panic button then stop gracefully
+            this.tradeProvider.emergencyCancel();
             await this.stop();
             throw error;
 

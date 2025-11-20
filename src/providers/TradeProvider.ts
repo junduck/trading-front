@@ -60,6 +60,23 @@ export abstract class TradeProvider {
   abstract cancelAllOrders(): Promise<number>;
 
   /**
+   * Emergency panic button - synchronous, never throws, best-effort cancel all.
+   *
+   * Called during error handling when normal async cancelAllOrders() is too risky.
+   * Provider should implement whatever "best effort" means for their business:
+   * - Spawn background task to retry cancelAllOrders()
+   * - Send notifications/alerts to user
+   * - Call emergency API endpoints
+   * - Whatever makes sense for the provider's domain
+   *
+   * Semantic contract:
+   * - MUST be synchronous (fire and forget)
+   * - MUST never throw
+   * - Provider decides implementation details
+   */
+  abstract emergencyCancel(): void;
+
+  /**
    * Amend/modify an existing order.
    *
    * @param orderId - ID of the order to replace

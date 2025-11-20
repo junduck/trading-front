@@ -18,7 +18,7 @@ import {
   type OrderRouteOptions,
   type NewsRouteOptions,
 } from "./Router.js";
-import { compose, type Algorithm } from "./Algorithm.js";
+import { compose, type Algorithm } from "./compose.js";
 import { orderHandlerMiddleware } from "./OrderHandler.js";
 import { Context } from "./Context.js";
 import { defaultLogger, type Logger } from "./Logger.js";
@@ -43,7 +43,7 @@ export class TradingBot {
   private readonly tradeProvider: TradeProvider;
   private readonly newsProvider?: NewsProvider | undefined;
   private readonly router: Router;
-  private readonly preRoute: Algorithm<Event>[] = [];
+  private readonly preRoute: Algorithm[] = [];
   private readonly logger: Logger;
   private readonly symbols: string[];
 
@@ -88,7 +88,7 @@ export class TradingBot {
    * @param middleware - Algorithm functions to add
    * @returns This agent for chaining
    */
-  use(...middleware: Algorithm<Event>[]): this {
+  use(...middleware: Algorithm[]): this {
     this.preRoute.push(...middleware);
     return this;
   }
@@ -96,80 +96,43 @@ export class TradingBot {
   /**
    * Route market events with optional filtering.
    *
-   * @param options - Filter options
-   * @param strategy - Algorithm stack
+   * @param options - Route options including strategy and filters
    */
-  market(
-    options: MarketRouteOptions,
-    ...strategy: Algorithm<MarketEvent>[]
-  ): this;
-  /**
-   * Route market events without filtering.
-   *
-   * @param strategy - Algorithm stack
-   */
-  market(...strategy: Algorithm<MarketEvent>[]): this;
-  market(
-    optionsOrFirstAlgo?: MarketRouteOptions | Algorithm<MarketEvent>,
-    ...restStrategy: Algorithm<MarketEvent>[]
-  ): this {
-    this.router.market(optionsOrFirstAlgo as any, ...restStrategy);
+  market(options: MarketRouteOptions): this {
+    this.router.market(options);
     return this;
   }
 
   /**
    * Route order events with optional filtering.
    *
-   * @param options - Filter options
-   * @param strategy - Algorithm stack
+   * @param options - Route options including strategy and filters
    */
-  order(options: OrderRouteOptions, ...strategy: Algorithm<OrderEvent>[]): this;
-  /**
-   * Route order events without filtering.
-   *
-   * @param strategy - Algorithm stack
-   */
-  order(...strategy: Algorithm<OrderEvent>[]): this;
-  order(
-    optionsOrFirstAlgo?: OrderRouteOptions | Algorithm<OrderEvent>,
-    ...restStrategy: Algorithm<OrderEvent>[]
-  ): this {
-    this.router.order(optionsOrFirstAlgo as any, ...restStrategy);
+  order(options: OrderRouteOptions): this {
+    this.router.order(options);
     return this;
   }
 
   /**
    * Route news events with optional filtering.
    *
-   * @param options - Filter options
-   * @param strategy - Algorithm stack
+   * @param options - Route options including strategy and filters
    */
-  news(options: NewsRouteOptions, ...strategy: Algorithm<NewsEvent>[]): this;
-  /**
-   * Route news events without filtering.
-   *
-   * @param strategy - Algorithm stack
-   */
-  news(...strategy: Algorithm<NewsEvent>[]): this;
-  news(
-    optionsOrFirstAlgo?: NewsRouteOptions | Algorithm<NewsEvent>,
-    ...restStrategy: Algorithm<NewsEvent>[]
-  ): this {
-    this.router.news(optionsOrFirstAlgo as any, ...restStrategy);
+  news(options: NewsRouteOptions): this {
+    this.router.news(options);
     return this;
   }
 
   /**
    * Start the agent event loop.
-   * Connects to data provider and trade provider, and begins processing events.
+   * Connects to providers, subscribes, and begins processing events.
    */
   async start(): Promise<void> {
     if (this.running) {
       throw new Error("TradingBot is already running");
     }
 
-    this.running = true;
-
+    // Phase 1: Connect to providers
     const connections = [
       this.dataProvider.connect(this.handleMarketEvent.bind(this)),
       this.tradeProvider.connect(this.handlePositionEvent.bind(this)),
@@ -181,6 +144,7 @@ export class TradingBot {
     }
     await Promise.all(connections);
 
+    // Phase 2: Get initial state and configure subscriptions
     this.position = await this.tradeProvider.getPosition();
 
     const subs = [
@@ -192,6 +156,14 @@ export class TradingBot {
     }
     await Promise.all(subs);
 
+    // Phase 3: Begin event emission
+    const begins = [this.dataProvider.begin(), this.tradeProvider.begin()];
+    if (this.newsProvider) {
+      begins.push(this.newsProvider.begin());
+    }
+    await Promise.all(begins);
+
+    this.running = true;
     this.emit("started", undefined);
 
     // TODO: Event loop performance optimization
@@ -202,7 +174,7 @@ export class TradingBot {
 
   /**
    * Stop the agent event loop.
-   * Disconnects from data provider and trade provider, and stops processing events.
+   * Stops event emission, unsubscribes, and disconnects from providers.
    */
   async stop(): Promise<void> {
     if (!this.running) {
@@ -211,18 +183,31 @@ export class TradingBot {
 
     this.running = false;
 
-    await this.dataProvider.unsubscribeSymbols(this.symbols);
-    this.tradeProvider.unsubscribe();
+    // Phase 1: Stop event emission
+    const ends = [this.dataProvider.end(), this.tradeProvider.end()];
+    if (this.newsProvider) {
+      ends.push(this.newsProvider.end());
+    }
+    await Promise.all(ends);
 
+    // Phase 2: Unsubscribe
+    const unsubs = [
+      this.dataProvider.unsubscribeSymbols(this.symbols),
+      this.tradeProvider.unsubscribe(),
+    ];
+    if (this.newsProvider) {
+      unsubs.push(this.newsProvider.unsubscribe());
+    }
+    await Promise.all(unsubs);
+
+    // Phase 3: Disconnect
     const disconnections = [
       this.dataProvider.disconnect(),
       this.tradeProvider.disconnect(),
     ];
-
     if (this.newsProvider) {
       disconnections.push(this.newsProvider.disconnect());
     }
-
     await Promise.all(disconnections);
 
     await this.emit("stopped", undefined);

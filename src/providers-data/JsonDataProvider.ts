@@ -4,7 +4,7 @@ import { DataProvider } from "../providers/DataProvider.js";
 import type { MarketEvent } from "../types/Events.js";
 import { TradingErrors } from "../core/TradingError.js";
 
-interface JsonOhlcvProviderOptions {
+interface JsonDataProviderOptions {
   filePath: string;
   mapping?: {
     symbolField?: string;
@@ -35,7 +35,7 @@ export function useUnixEpochExtractor(
  * Designed for backtesting scenarios where historical data is replayed sequentially.
  * @platform node
  */
-export class JsonOhlcvProvider extends DataProvider {
+export class JsonDataProvider extends DataProvider {
   private filePath: string;
   private mapping: {
     symbolField: string;
@@ -46,7 +46,7 @@ export class JsonOhlcvProvider extends DataProvider {
   private running = false;
   private callback?: (event: MarketEvent) => void | Promise<void>;
 
-  constructor(opts: JsonOhlcvProviderOptions) {
+  constructor(opts: JsonDataProviderOptions) {
     super();
     this.filePath = opts.filePath;
     this.mapping = {
@@ -93,7 +93,7 @@ export class JsonOhlcvProvider extends DataProvider {
     if (!this.connected || !this.callback) {
       throw TradingErrors.provider({
         message: "Must call connect() before begin()",
-        sourceName: "JsonOhlcvProvider",
+        sourceName: "JsonDataProvider",
         severity: "halt",
         category: "state",
       });

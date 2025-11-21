@@ -164,14 +164,14 @@ export class TradingBot {
     await Promise.all(subs);
 
     // Phase 3: Begin event emission
+    this.running = true;
+    this.emit("started", undefined);
+
     const begins = [this.dataProvider.begin(), this.tradeProvider.begin()];
     if (this.newsProvider) {
       begins.push(this.newsProvider.begin());
     }
     await Promise.all(begins);
-
-    this.running = true;
-    this.emit("started", undefined);
 
     // TODO: Event loop performance optimization
     // - Add event batching for high-frequency data

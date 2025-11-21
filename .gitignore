@@ -46,8 +46,12 @@ Thumbs.db
 
 # Local dev memo
 /memo
+*.memo.md
 
 # Local planning documents
 task.md
 refactor.md
 plan*.md
+
+# Local test fixtures
+fixtures/

@@ -25,7 +25,6 @@ import {
   useUnixEpochExtractor,
 } from "../src/providers-data/JsonOhlcvProvider.js";
 import type { MarketEvent, OrderEvent } from "../src/types/Events.js";
-import type { Order } from "@junduck/trading-core";
 import { appraisePosition } from "@junduck/trading-core";
 
 async function main() {
@@ -124,16 +123,7 @@ async function main() {
               )} = ¥${cost.toFixed(2)}`
             );
 
-            const order: Order = {
-              symbol: "000001",
-              side: "BUY",
-              effect: "OPEN_LONG",
-              type: "MARKET",
-              quantity,
-              created: event.timestamp,
-            };
-
-            ctx.submitOrder(order);
+            ctx.buyMarket("000001", quantity);
           }
         }
 
@@ -152,16 +142,7 @@ async function main() {
             )} = ¥${proceeds.toFixed(2)}`
           );
 
-          const order: Order = {
-            symbol: "000001",
-            side: "SELL",
-            effect: "CLOSE_LONG",
-            type: "MARKET",
-            quantity: position,
-            created: event.timestamp,
-          };
-
-          ctx.submitOrder(order);
+          ctx.sellMarket("000001", position);
         }
       },
     ],

@@ -107,15 +107,63 @@ bot.market({
     async (ctx) => {
       const signals = ctx.state.get("crossover");
       const signal = signals?.get("AAPL");
+      const price = ctx.snapshot.price.get("AAPL");
+      const cash = ctx.position.cash;
 
       if (signal?.signal === "bullish") {
-        // Buy
+        // Buy at market using convenience method
+        const quantity = Math.floor(cash / price);
+        ctx.buyMarket("AAPL", quantity);
       } else if (signal?.signal === "bearish") {
-        // Sell
+        // Sell at market using convenience method
+        ctx.sellMarket("AAPL", position);
       }
     }
   ]
 });
+```
+
+## Convenience Methods
+
+The `Context` provides convenience methods to simplify common order patterns:
+
+### Market Orders
+
+```ts
+ctx.buyMarket(symbol, quantity)   // Buy at market price
+ctx.sellMarket(symbol, quantity)  // Sell at market price
+```
+
+### Limit Orders
+
+```ts
+ctx.buy(symbol, quantity, price)   // Buy with limit price
+ctx.sell(symbol, quantity, price)  // Sell with limit price
+```
+
+**Features:**
+
+- Automatically generates unique order IDs (format: `timestamp-random6chars`)
+- Sets appropriate `side` and `effect` fields
+- Uses event timestamp as order creation time
+- Returns tracking ID for monitoring order status
+
+**Example:**
+
+```ts
+// Before: Manual order creation
+const order: Order = {
+  symbol: "AAPL",
+  side: "BUY",
+  effect: "OPEN_LONG",
+  type: "MARKET",
+  quantity: 100,
+  created: ctx.event.timestamp,
+};
+ctx.submitOrder(order);
+
+// After: Using convenience method
+ctx.buyMarket("AAPL", 100);
 ```
 
 ## Key Principles

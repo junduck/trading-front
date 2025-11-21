@@ -37,8 +37,16 @@ export {
   type MockNewsProviderConfig,
 } from "./providers/MockNewsProvider.js";
 
-// Middlewares
-export { logger, type LoggerOptions } from "./algorithms/index.js";
+// Algorithms
+export {
+  macd,
+  type MacdOptions,
+  type MacdValue,
+  positionPrinter,
+  type PositionPrinterOptions,
+  eventCounter,
+  type EventCounterOptions,
+} from "./algorithms/index.js";
 
 // Backtest
 export {

@@ -51,6 +51,13 @@ export class TradingBot {
   private snapshot: MarketSnapshot;
   private running = false;
 
+  // Business logic: Event queues prevent race conditions when events arrive faster than processing.
+  // Each provider has its own queue to ensure sequential processing per event source.
+  // Events from different sources can process concurrently (market vs order vs news).
+  private marketQueue = Promise.resolve();
+  private orderQueue = Promise.resolve();
+  private newsQueue = Promise.resolve();
+
   // Event emitter for agent-level events (one handler per event type)
   private readonly eventHandlers: Map<string, AgentEventHandler> = new Map();
 
@@ -169,7 +176,6 @@ export class TradingBot {
     // TODO: Event loop performance optimization
     // - Add event batching for high-frequency data
     // - Implement event prioritization (fills before market data)
-    // - Add backpressure handling for slow middleware
   }
 
   /**
@@ -259,32 +265,62 @@ export class TradingBot {
    * Handle a market event from the data provider.
    * Routes the event to appropriate middleware and executes the chain.
    *
+   * Business logic: Events are queued to prevent race conditions.
+   * If middleware processes slowly, incoming events wait in queue rather than
+   * running concurrently and corrupting shared state (position, snapshot).
+   *
    * @param event - Market event to process
    */
   private async handleMarketEvent(event: MarketEvent): Promise<void> {
-    this.updateSnapshot(event);
-    await this.handleEvent(event);
+    // Business logic: Chain this event's processing to the previous event's completion.
+    // The queue ensures sequential processing: event N+1 waits for event N to finish.
+    this.marketQueue = this.marketQueue.then(async () => {
+      this.updateSnapshot(event);
+      await this.handleEvent(event);
+    });
+
+    await this.marketQueue;
   }
 
   /**
    * Handle an order event from the trade provider.
    * Routes the event to appropriate middleware and executes the chain.
    *
+   * Business logic: Events are queued to prevent race conditions.
+   * Order events must process sequentially to maintain position consistency.
+   *
    * @param event - Order event to process
    */
   private async handlePositionEvent(event: OrderEvent): Promise<void> {
-    this.updatePosition(event);
-    await this.handleEvent(event);
+    // Business logic: Queue order events separately from market events.
+    // This allows market and order events to process concurrently while
+    // maintaining sequential order within each event type.
+    this.orderQueue = this.orderQueue.then(async () => {
+      this.updatePosition(event);
+      await this.handleEvent(event);
+    });
+
+    await this.orderQueue;
   }
 
   /**
    * Handle a news event from the news provider.
    * Routes the event to appropriate middleware and executes the chain.
    *
+   * Business logic: Events are queued to prevent race conditions.
+   * News events process sequentially within their own queue.
+   *
    * @param event - News event to process
    */
   private async handleNewsEvent(event: NewsEvent): Promise<void> {
-    await this.handleEvent(event);
+    // Business logic: News events have their own queue, independent of market/order queues.
+    // This allows concurrent processing across event types while maintaining
+    // sequential order within each type.
+    this.newsQueue = this.newsQueue.then(async () => {
+      await this.handleEvent(event);
+    });
+
+    await this.newsQueue;
   }
 
   /**

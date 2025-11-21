@@ -2,7 +2,7 @@
 // These exports require Node.js APIs and will not work in browser environments
 
 // Data providers
-export { JsonOhlcvProvider } from "./providers-data/JsonOhlcvProvider.js";
+export { JsonDataProvider } from "./providers-data/JsonDataProvider.js";
 export { SinaHqProvider } from "./providers-data/SinaHqProvider.js";
 
 // News providers

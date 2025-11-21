@@ -24,18 +24,6 @@ export {
 export { DataProvider } from "./providers/DataProvider.js";
 export { TradeProvider } from "./providers/TradeProvider.js";
 export { NewsProvider } from "./providers/NewsProvider.js";
-export {
-  MockDataProvider,
-  type MockDataProviderConfig,
-} from "./providers/MockDataProvider.js";
-export {
-  MockTradeProvider,
-  type MockTradeProviderConfig,
-} from "./providers/MockTradeProvider.js";
-export {
-  MockNewsProvider,
-  type MockNewsProviderConfig,
-} from "./providers/MockNewsProvider.js";
 
 // Algorithms
 export {

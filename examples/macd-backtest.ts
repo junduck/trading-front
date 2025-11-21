@@ -25,7 +25,7 @@ import {
   useUnixEpochExtractor,
 } from "../src/providers-data/JsonDataProvider.js";
 import type { MarketEvent, OrderEvent } from "../src/types/Events.js";
-import { appraisePosition } from "@junduck/trading-core";
+import { appraisePosition, q } from "@junduck/trading-core";
 
 async function main() {
   console.log("🚀 MACD Trading Strategy Backtest\n");
@@ -61,8 +61,6 @@ async function main() {
   // 3. Crossover detects signals -> state.crossover
   bot.use(crossover());
 
-  // Track position for order sizing
-  let position = 0;
   let eventCount = 0;
   let tradeCount = 0;
 
@@ -95,7 +93,9 @@ async function main() {
         }
 
         // Execute on bullish crossover: buy with all cash
-        if (signal.signal === "bullish" && position === 0) {
+        const currentPosition = q.qty(ctx.position, "000001");
+
+        if (signal.signal === "bullish" && currentPosition === 0) {
           const cash = ctx.position.cash;
 
           if (cash < 100) {
@@ -128,27 +128,27 @@ async function main() {
         }
 
         // Execute on bearish crossover: sell all holdings
-        if (signal.signal === "bearish" && position > 0) {
+        if (signal.signal === "bearish" && currentPosition > 0) {
           tradeCount++;
-          const proceeds = position * price;
+          const proceeds = currentPosition * price;
           console.log(
             `[${event.timestamp.toISOString()}] 🔴 SELL SIGNAL (crossover: bearish, hist: ${signal.current.toFixed(
               4
             )})`
           );
           console.log(
-            `   Selling ${position} shares @ ¥${price.toFixed(
+            `   Selling ${currentPosition} shares @ ¥${price.toFixed(
               2
             )} = ¥${proceeds.toFixed(2)}`
           );
 
-          ctx.sellMarket("000001", position);
+          ctx.sellMarket("000001", currentPosition);
         }
       },
     ],
   });
 
-  // Track position updates from filled orders
+  // Log filled orders
   bot.order({
     status: "FILLED",
     strategy: [
@@ -158,15 +158,8 @@ async function main() {
 
         if (!state || state.symbol !== "000001") return;
 
-        const qty = state.filledQuantity ?? 0;
-
-        if (state.side === "BUY") {
-          position += qty;
-          console.log(`   ✓ Position: ${position} shares`);
-        } else if (state.side === "SELL") {
-          position -= qty;
-          console.log(`   ✓ Position: ${position} shares`);
-        }
+        const currentPosition = q.qty(ctx.position, "000001");
+        console.log(`   ✓ Position: ${currentPosition} shares`);
       },
     ],
   });
@@ -184,29 +177,38 @@ async function main() {
     console.error("\n❌ Error:", error);
   });
 
-  // Start backtest
-  await bot.start();
-
+  // Show initial configuration
   console.log("📊 Initial State:");
-  console.log(`   Cash: ¥${bot.getPosition().cash.toFixed(2)}`);
-  console.log(`   Position: ${position} shares\n`);
+  console.log(`   Cash: ¥100,000.00`);
+  console.log(`   Position: 0 shares\n`);
 
   console.log("🎬 Running backtest...\n");
 
-  // Backtest runs synchronously in begin(), so this waits for completion
-  // (No need to wait for "stopped" event separately)
+  // Start backtest - runs synchronously in backtest mode
+  await bot.start();
+
+  // Note: Orders submitted on the last bar cannot be matched
+  // because BacktestProvider matches orders when the next bar arrives
 
   // Print final results
   const finalPosition = bot.getPosition();
   const finalSnapshot = bot.getSnapshot();
   const totalEquity = appraisePosition(finalPosition, finalSnapshot);
   const totalReturn = ((totalEquity - 100000) / 100000) * 100;
+  const finalHolding = q.qty(finalPosition, "000001");
 
   console.log("\n📊 Final Results:");
   console.log(`   Events Processed: ${eventCount}`);
   console.log(`   Trades Executed: ${tradeCount}`);
   console.log(`   Cash: ¥${finalPosition.cash.toFixed(2)}`);
-  console.log(`   Position: ${position} shares`);
+  console.log(`   Position: ${finalHolding} shares`);
+  if (finalHolding > 0) {
+    const finalPrice = finalSnapshot.price.get("000001") ?? 0;
+    const unrealizedValue = finalHolding * finalPrice;
+    console.log(
+      `   Unrealized Value: ¥${unrealizedValue.toFixed(2)} (@ ¥${finalPrice.toFixed(2)})`
+    );
+  }
   console.log(
     `   Total Commission: ¥${finalPosition.totalCommission.toFixed(2)}`
   );

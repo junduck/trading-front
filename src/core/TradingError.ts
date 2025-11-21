@@ -65,7 +65,7 @@ export class TradingError extends Error {
   readonly category: ErrorCategory;
 
   /** Event that triggered this error */
-  readonly event: Event;
+  readonly event?: Event;
 
   /** Timestamp when error occurred */
   readonly timestamp: Date;
@@ -73,27 +73,28 @@ export class TradingError extends Error {
   /** Additional context for debugging (optional, keep lightweight) */
   readonly metadata?: Record<string, unknown>;
 
-  constructor(
-    message: string,
-    severity: ErrorSeverity,
-    source: ErrorSource,
-    category: ErrorCategory,
-    event: Event,
-    sourceName?: string,
-    metadata?: Record<string, unknown>
-  ) {
-    super(message);
-    this.severity = severity;
-    this.source = source;
-    this.category = category;
-    this.event = event;
-    if (sourceName) {
-      this.sourceName = sourceName;
+  constructor(opts: {
+    message: string;
+    severity: ErrorSeverity;
+    source: ErrorSource;
+    category: ErrorCategory;
+    event?: Event;
+    sourceName?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    super(opts.message);
+    this.severity = opts.severity;
+    this.source = opts.source;
+    this.category = opts.category;
+    if (opts.event !== undefined) {
+      this.event = opts.event;
     }
-    if (metadata) {
-      this.metadata = metadata;
+    if (opts.sourceName !== undefined) {
+      this.sourceName = opts.sourceName;
     }
-
+    if (opts.metadata !== undefined) {
+      this.metadata = opts.metadata;
+    }
     this.timestamp = new Date();
 
     // Maintain proper stack trace
@@ -131,8 +132,8 @@ export class TradingError extends Error {
       sourceName: this.sourceName,
       timestamp: this.timestamp.toISOString(),
       event: {
-        type: this.event.type,
-        timestamp: this.event.timestamp.toISOString(),
+        type: this.event?.type,
+        timestamp: this.event?.timestamp.toISOString(),
       },
       metadata: this.metadata,
       stack: this.stack,
@@ -147,61 +148,60 @@ export const TradingErrors = {
   /**
    * Algorithm/middleware threw an error.
    */
-  algorithm: (
-    message: string,
-    event: Event,
-    sourceName: string,
-    severity?: ErrorSeverity,
-    category?: ErrorCategory
-  ) => {
-    return new TradingError(
-      message,
-      severity ?? "recover",
-      "algorithm",
-      category ?? "logic",
-      event,
-      sourceName
-    );
+  algorithm: (opts: {
+    message: string;
+    event: Event; // at middleware call site, an event must exist
+    sourceName: string;
+    severity?: ErrorSeverity;
+    category?: ErrorCategory;
+  }) => {
+    return new TradingError({
+      message: opts.message,
+      severity: opts.severity ?? "recover",
+      source: "algorithm",
+      category: opts.category ?? "logic",
+      event: opts.event,
+      sourceName: opts.sourceName,
+    });
   },
 
   /**
    * Provider error (data/trade provider).
    */
-  provider: (
-    message: string,
-    event: Event,
-    sourceName: string,
-    severity?: ErrorSeverity,
-    category?: ErrorCategory
-  ) => {
-    return new TradingError(
-      message,
-      severity ?? "halt",
-      "provider",
-      category ?? "network",
-      event,
-      sourceName
-    );
+  provider: (opts: {
+    message: string;
+    sourceName: string;
+    event?: Event; // error may not be triggered by an event
+    severity?: ErrorSeverity;
+    category?: ErrorCategory;
+  }) => {
+    return new TradingError({
+      message: opts.message,
+      severity: opts.severity ?? "halt",
+      source: "provider",
+      category: opts.category ?? "network",
+      ...(opts.event !== undefined && { event: opts.event }),
+      sourceName: opts.sourceName,
+    });
   },
 
   /**
    * System error (TradingBot internal).
    */
-  system: (
-    message: string,
-    event: Event,
-    severity?: ErrorSeverity,
-    category?: ErrorCategory,
-    metadata?: Record<string, unknown>
-  ) => {
-    return new TradingError(
-      message,
-      severity ?? "fatal",
-      "system",
-      category ?? "system",
-      event,
-      undefined,
-      metadata
-    );
+  system: (opts: {
+    message: string;
+    event?: Event; // error may not be triggered by an event
+    severity?: ErrorSeverity;
+    category?: ErrorCategory;
+    metadata?: Record<string, unknown>;
+  }) => {
+    return new TradingError({
+      message: opts.message,
+      severity: opts.severity ?? "fatal",
+      source: "system",
+      category: opts.category ?? "system",
+      ...(opts.event !== undefined && { event: opts.event }),
+      ...(opts.metadata !== undefined && { metadata: opts.metadata }),
+    });
   },
 };

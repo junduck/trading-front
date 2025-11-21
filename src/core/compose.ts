@@ -46,12 +46,12 @@ export function compose(strat: Strategy): Algorithm {
     const dispatch = async (i: number): Promise<void> => {
       if (i <= index) {
         // Runtime error during event handling - use TradingError
-        throw TradingErrors.system(
-          "next() called multiple times",
-          ctx.event,
-          "fatal",
-          "logic"
-        );
+        throw TradingErrors.system({
+          message: "next() called multiple times",
+          event: ctx.event,
+          severity: "fatal",
+          category: "logic",
+        });
       }
       index = i;
 

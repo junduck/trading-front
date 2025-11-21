@@ -189,4 +189,134 @@ export class Context {
   getPendingActions(): PendingAction[] {
     return this.pendingActions;
   }
+
+  /**
+   * Buy at market price (open long position).
+   *
+   * @param symbol - Symbol to buy
+   * @param quantity - Quantity to buy
+   * @param reason - Reason for the order (default: "algo")
+   * @returns Tracking ID for checking action status later
+   *
+   * @example
+   * ```ts
+   * ctx.buyMarket("AAPL", 100);
+   * ```
+   */
+  buyMarket(
+    symbol: string,
+    quantity: number,
+    reason: OrderActionReason = "algo"
+  ): string {
+    const order: Order = {
+      id: this.tradeProvider.genOrderId(),
+      symbol,
+      side: "BUY",
+      effect: "OPEN_LONG",
+      type: "MARKET",
+      quantity,
+      created: this.event.timestamp,
+    };
+
+    return this.submitOrder(order, reason);
+  }
+
+  /**
+   * Sell at market price (close long position).
+   *
+   * @param symbol - Symbol to sell
+   * @param quantity - Quantity to sell
+   * @param reason - Reason for the order (default: "algo")
+   * @returns Tracking ID for checking action status later
+   *
+   * @example
+   * ```ts
+   * ctx.sellMarket("AAPL", 100);
+   * ```
+   */
+  sellMarket(
+    symbol: string,
+    quantity: number,
+    reason: OrderActionReason = "algo"
+  ): string {
+    const order: Order = {
+      id: this.tradeProvider.genOrderId(),
+      symbol,
+      side: "SELL",
+      effect: "CLOSE_LONG",
+      type: "MARKET",
+      quantity,
+      created: this.event.timestamp,
+    };
+
+    return this.submitOrder(order, reason);
+  }
+
+  /**
+   * Buy with limit order (open long position).
+   *
+   * @param symbol - Symbol to buy
+   * @param quantity - Quantity to buy
+   * @param price - Limit price
+   * @param reason - Reason for the order (default: "algo")
+   * @returns Tracking ID for checking action status later
+   *
+   * @example
+   * ```ts
+   * ctx.buy("AAPL", 100, 150.00);
+   * ```
+   */
+  buy(
+    symbol: string,
+    quantity: number,
+    price: number,
+    reason: OrderActionReason = "algo"
+  ): string {
+    const order: Order = {
+      id: this.tradeProvider.genOrderId(),
+      symbol,
+      side: "BUY",
+      effect: "OPEN_LONG",
+      type: "LIMIT",
+      quantity,
+      price,
+      created: this.event.timestamp,
+    };
+
+    return this.submitOrder(order, reason);
+  }
+
+  /**
+   * Sell with limit order (close long position).
+   *
+   * @param symbol - Symbol to sell
+   * @param quantity - Quantity to sell
+   * @param price - Limit price
+   * @param reason - Reason for the order (default: "algo")
+   * @returns Tracking ID for checking action status later
+   *
+   * @example
+   * ```ts
+   * ctx.sell("AAPL", 100, 155.00);
+   * ```
+   */
+  sell(
+    symbol: string,
+    quantity: number,
+    price: number,
+    reason: OrderActionReason = "algo"
+  ): string {
+    const order: Order = {
+      id: this.tradeProvider.genOrderId(),
+      symbol,
+      side: "SELL",
+      effect: "CLOSE_LONG",
+      type: "LIMIT",
+      quantity,
+      price,
+      created: this.event.timestamp,
+    };
+
+    return this.submitOrder(order, reason);
+  }
 }

@@ -9,7 +9,4 @@ export {
   positionPrinter,
   type PositionPrinterOptions,
 } from "./position-printer.js";
-export {
-  eventCounter,
-  type EventCounterOptions,
-} from "./event-counter.js";
+export { eventCounter, type EventCounterOptions } from "./event-counter.js";

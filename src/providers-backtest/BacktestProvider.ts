@@ -47,6 +47,10 @@ export class BacktestProvider extends TradeProvider {
     };
   }
 
+  genOrderId(): string {
+    return `backtest_${this.orderIdCounter++}`;
+  }
+
   /**
    * Returns middleware that matches orders with market data.
    * Register this as first middleware in TradingBot.
@@ -66,18 +70,15 @@ export class BacktestProvider extends TradeProvider {
   }
 
   async submitOrder(order: Order): Promise<Order> {
-    const orderId = order.id || `order_${this.orderIdCounter++}`;
-
     const orderState: OrderState = {
       ...order,
-      id: orderId,
       filledQuantity: 0,
       remainingQuantity: order.quantity,
       status: "OPEN",
       modified: new Date(),
     };
 
-    this.pendingOrders.set(orderId, orderState);
+    this.pendingOrders.set(order.id, orderState);
 
     if (this.running && this.orderCallback) {
       await this.orderCallback({
@@ -87,7 +88,7 @@ export class BacktestProvider extends TradeProvider {
       });
     }
 
-    return { ...order, id: orderId };
+    return order;
   }
 
   async getOrder(orderId: string): Promise<Order> {

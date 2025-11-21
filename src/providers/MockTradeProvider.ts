@@ -47,6 +47,10 @@ export class MockTradeProvider extends TradeProvider {
     this.priceProvider = config.priceProvider ?? undefined;
   }
 
+  genOrderId(): string {
+    return `MOCK-${this.nextOrderId++}`;
+  }
+
   async connect(callback: (event: OrderEvent) => void): Promise<void> {
     this.callback = callback;
     this.connected = true;
@@ -74,11 +78,8 @@ export class MockTradeProvider extends TradeProvider {
       throw new Error("MockTradeProvider is not connected");
     }
 
-    const orderId = `MOCK-${this.nextOrderId++}`;
-
     const submittedOrder: Order = {
       ...order,
-      id: orderId,
       created: new Date(),
     };
 
@@ -90,12 +91,12 @@ export class MockTradeProvider extends TradeProvider {
       modified: new Date(),
     };
 
-    this.orders.set(orderId, orderState);
+    this.orders.set(order.id, orderState);
     this.emitOrderEvent(orderState);
 
     // Simulate order processing after latency
     setTimeout(() => {
-      this.processOrder(orderId).catch((err) =>
+      this.processOrder(order.id).catch((err) =>
         console.error("Error processing order:", err)
       );
     }, this.orderLatency);

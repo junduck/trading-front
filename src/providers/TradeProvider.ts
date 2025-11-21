@@ -15,6 +15,14 @@ import type { OrderEvent } from "../types/Events.js";
  */
 export abstract class TradeProvider {
   /**
+   * Generate a unique order ID.
+   * Provider-specific
+   *
+   * @returns Unique order ID
+   */
+  abstract genOrderId(): string;
+
+  /**
    * Get the current position state from the account.
    *
    * @returns Current position including cash, commission, and realized PnL

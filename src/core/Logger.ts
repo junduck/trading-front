@@ -36,7 +36,8 @@ export interface LoggerConfig {
  * ```
  */
 export function createLogger(config: LoggerConfig = {}): Logger {
-  const isDev = process.env["NODE_ENV"] !== "production";
+  const isBrowser = typeof globalThis !== "undefined" && "window" in globalThis;
+  const isDev = !isBrowser && process.env["NODE_ENV"] !== "production";
 
   const level = config.level ?? (isDev ? "debug" : "info");
   const pretty = config.pretty ?? isDev;
@@ -47,7 +48,8 @@ export function createLogger(config: LoggerConfig = {}): Logger {
       err: pino.stdSerializers.err,
       error: pino.stdSerializers.err,
     },
-    ...(pretty && {
+    // pino-pretty only works in Node.js, skip in browser
+    ...(pretty && !isBrowser && {
       transport: {
         target: "pino-pretty",
         options: {
@@ -56,6 +58,12 @@ export function createLogger(config: LoggerConfig = {}): Logger {
           ignore: "pid,hostname",
           singleLine: false,
         },
+      },
+    }),
+    // In browsers, pino uses browser configuration by default
+    ...(isBrowser && {
+      browser: {
+        asObject: false,
       },
     }),
     ...config.pinoOptions,

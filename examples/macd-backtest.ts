@@ -21,9 +21,9 @@ import {
 } from "../src/index.js";
 import { BacktestProvider } from "../src/providers-backtest/BacktestProvider.js";
 import {
-  JsonOhlcvProvider,
+  JsonDataProvider,
   useUnixEpochExtractor,
-} from "../src/providers-data/JsonOhlcvProvider.js";
+} from "../src/providers-data/JsonDataProvider.js";
 import type { MarketEvent, OrderEvent } from "../src/types/Events.js";
 import { appraisePosition } from "@junduck/trading-core";
 
@@ -31,7 +31,7 @@ async function main() {
   console.log("🚀 MACD Trading Strategy Backtest\n");
 
   // Create data provider loading from JSON file
-  const dataProvider = new JsonOhlcvProvider({
+  const dataProvider = new JsonDataProvider({
     filePath: "./fixtures/ohlcv-5m-000001.json",
     mapping: {
       timestampField: useUnixEpochExtractor("timestamp", "s"),

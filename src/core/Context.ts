@@ -81,8 +81,74 @@ export class Context {
    * Event-scoped state for sharing data between middleware within this event.
    * Each event gets a fresh state map - no cross-event races.
    * Middleware can store calculated indicators, flags, etc.
+   *
+   * Prefer using `get()` and `set()` methods for type-safe access.
    */
   readonly state: Map<string, unknown> = new Map();
+
+  /**
+   * Get a value from event-scoped state with type safety.
+   *
+   * @param key - State key
+   * @returns The value cast to T, or undefined if not set
+   *
+   * @example
+   * ```ts
+   * const macdMap = ctx.get<Map<string, MacdValue>>("macd");
+   * ```
+   */
+  get<T>(key: string): T | undefined;
+  /**
+   * Get a symbol-specific value from a symbol-keyed Map in state.
+   * Common pattern for indicator data stored per symbol.
+   *
+   * @param key - State key for the Map
+   * @param symbol - Symbol to look up in the Map
+   * @returns The value for the symbol, or undefined
+   *
+   * @example
+   * ```ts
+   * const signal = ctx.get<CrossoverValue>("crossover", "000001");
+   * ```
+   */
+  get<T>(key: string, symbol: string): T | undefined;
+  get<T>(key: string, symbol?: string): T | undefined {
+    const value = this.state.get(key);
+    if (symbol === undefined) {
+      return value as T | undefined;
+    }
+    // Assume value is Map<string, T> for symbol lookup
+    if (value instanceof Map) {
+      return value.get(symbol) as T | undefined;
+    }
+    return undefined;
+  }
+
+  /**
+   * Set a value in event-scoped state.
+   *
+   * @param key - State key
+   * @param value - Value to store
+   */
+  set(key: string, value: unknown): void {
+    this.state.set(key, value);
+  }
+
+  /**
+   * Get the current price for a symbol from the snapshot.
+   *
+   * @param symbol - Symbol to look up
+   * @returns The price, or undefined if not available
+   *
+   * @example
+   * ```ts
+   * const price = ctx.price("000001");
+   * if (price) { ... }
+   * ```
+   */
+  price(symbol: string): number | undefined {
+    return this.snapshot.price.get(symbol);
+  }
 
   /**
    * Pending actions to be executed (response).

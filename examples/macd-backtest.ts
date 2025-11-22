@@ -17,6 +17,7 @@ import {
   TradingBot,
   macd,
   crossover,
+  maxQty,
   type CrossoverValue,
 } from "../src/index.js";
 import { BacktestProvider } from "../src/providers-backtest/BacktestProvider.js";
@@ -71,16 +72,12 @@ async function main() {
       async (ctx) => {
         const event = ctx.event as MarketEvent;
 
-        // Read crossover signals from state (written by crossover middleware)
-        const crossoverSignals = ctx.state.get("crossover") as
-          | Map<string, CrossoverValue>
-          | undefined;
-        const signal = crossoverSignals?.get("000001");
-
+        // Read crossover signal from state (written by crossover middleware)
+        const signal = ctx.get<CrossoverValue>("crossover", "000001");
         if (!signal) return;
 
         eventCount++;
-        const price = ctx.snapshot.price.get("000001");
+        const price = ctx.price("000001");
         if (!price) return;
 
         // Print crossover signals for first few events and periodically
@@ -96,18 +93,7 @@ async function main() {
         const currentPosition = q.qty(ctx.position, "000001");
 
         if (signal.signal === "bullish" && currentPosition === 0) {
-          const cash = ctx.position.cash;
-
-          if (cash < 100) {
-            console.log(
-              `[${event.timestamp.toISOString()}] ⏭️  Insufficient cash: ¥${cash.toFixed(
-                2
-              )}`
-            );
-            return;
-          }
-
-          const quantity = Math.floor(cash / price);
+          const quantity = maxQty(ctx.position, price);
 
           if (quantity > 0) {
             tradeCount++;

@@ -46,6 +46,13 @@ export {
   type BacktestConfig,
 } from "./providers-backtest/BacktestProvider.js";
 
+// Utilities
+export {
+  maxQty,
+  qtyForValue,
+  type OrderSizingOptions,
+} from "./utils/index.js";
+
 // Types
 export type {
   Event,

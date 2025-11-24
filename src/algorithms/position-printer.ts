@@ -35,7 +35,9 @@ export interface PositionPrinterOptions {
  * agent.use(positionPrinter({ printShort: false, printSummary: false }));
  * ```
  */
-export function positionPrinter(options: PositionPrinterOptions = {}): UniversalAlgorithm {
+export function positionPrinter(
+  options: PositionPrinterOptions = {}
+): UniversalAlgorithm {
   const {
     printLong = true,
     printShort = true,
@@ -46,20 +48,22 @@ export function positionPrinter(options: PositionPrinterOptions = {}): Universal
   return async (ctx, next) => {
     // Business logic: Filter for order events with fill executions.
     // Only fills update the position, other order events (state changes) don't.
-    if (ctx.event.type === "order" && ctx.event.execution) {
-      const fill = ctx.event.execution;
+    if (ctx.event.type === "order" && ctx.event.effect) {
+      const effect = ctx.event.effect;
 
       ctx.logger.info({
         msg: "Order filled",
-        fillId: fill.id,
-        orderId: fill.orderId,
-        symbol: fill.symbol,
-        side: fill.side,
-        effect: fill.effect,
-        quantity: fill.quantity,
-        price: fill.price,
-        commission: fill.commission,
-        timestamp: fill.created.toISOString(),
+        fillId: effect.fill.id,
+        orderId: effect.fill.orderId,
+        symbol: effect.fill.symbol,
+        side: effect.fill.side,
+        effect: effect.fill.effect,
+        quantity: effect.fill.quantity,
+        price: effect.fill.price,
+        commission: effect.fill.commission,
+        timestamp: effect.fill.created.toISOString(),
+        realisedPnL: effect.realisedPnL,
+        cashflow: effect.cashFlow,
       });
 
       // Print updated position from ctx.position (automatically updated by bot)
@@ -90,7 +94,8 @@ export function positionPrinter(options: PositionPrinterOptions = {}): Universal
           longPositions[symbol] = {
             quantity: longPos.quantity,
             totalCost: longPos.totalCost,
-            avgCost: longPos.quantity > 0 ? longPos.totalCost / longPos.quantity : 0,
+            avgCost:
+              longPos.quantity > 0 ? longPos.totalCost / longPos.quantity : 0,
             realisedPnL: longPos.realisedPnL,
             lots: longPos.lots.length,
             modified: longPos.modified.toISOString(),
@@ -110,7 +115,10 @@ export function positionPrinter(options: PositionPrinterOptions = {}): Universal
           shortPositions[symbol] = {
             quantity: shortPos.quantity,
             totalProceeds: shortPos.totalProceeds,
-            avgProceeds: shortPos.quantity > 0 ? shortPos.totalProceeds / shortPos.quantity : 0,
+            avgProceeds:
+              shortPos.quantity > 0
+                ? shortPos.totalProceeds / shortPos.quantity
+                : 0,
             realisedPnL: shortPos.realisedPnL,
             lots: shortPos.lots.length,
             modified: shortPos.modified.toISOString(),

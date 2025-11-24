@@ -1,4 +1,8 @@
-import type { Fill, MarketQuote, OrderState } from "@junduck/trading-core";
+import type {
+  FillEffect,
+  MarketQuote,
+  OrderState,
+} from "@junduck/trading-core";
 import type { LiveNews } from "./News.js";
 
 /**
@@ -28,7 +32,7 @@ export interface NewsEvent extends BaseEvent {
 export interface OrderEvent extends BaseEvent {
   type: "order";
   state?: OrderState;
-  execution?: Fill;
+  effect?: FillEffect;
 }
 
 /**

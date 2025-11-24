@@ -1,7 +1,7 @@
 import {
   type Position,
   type MarketSnapshot,
-  applyFill,
+  processFill,
 } from "@junduck/trading-core";
 import type {
   Event,
@@ -427,7 +427,7 @@ export class TradingBot {
 
     const status = event.state.status;
     if (status === "FILLED" || status === "PARTIAL") {
-      if (!event.execution) {
+      if (!event.effect) {
         throw new Error(
           `OrderEvent with status '${status}' must include execution data. ` +
             `This indicates a provider bug. Order: ${JSON.stringify(
@@ -435,7 +435,7 @@ export class TradingBot {
             )}`
         );
       }
-      applyFill(this.position, event.execution);
+      processFill(this.position, event.effect.fill);
     }
   }
 

@@ -1,4 +1,4 @@
-import type { Algorithm } from "../core/compose.js";
+import type { UniversalAlgorithm } from "../core/compose.js";
 
 /** Options for event counter */
 export interface EventCounterOptions {
@@ -20,7 +20,7 @@ export interface EventCounterOptions {
  * - Demonstrates the middleware pattern: before → next() → after
  *
  * @param options - Configuration options
- * @returns Algorithm middleware function
+ * @returns Universal algorithm middleware function (works with all event types)
  *
  * @example
  * ```ts
@@ -31,7 +31,7 @@ export interface EventCounterOptions {
  * agent.use(eventCounter({ interval: 50 }));
  * ```
  */
-export function eventCounter(options: EventCounterOptions = {}): Algorithm {
+export function eventCounter(options: EventCounterOptions = {}): UniversalAlgorithm {
   const { interval = 100 } = options;
 
   let count = 0;

@@ -18,7 +18,7 @@ import {
   type OrderRouteOptions,
   type NewsRouteOptions,
 } from "./Router.js";
-import { compose, type Algorithm } from "./compose.js";
+import { compose, type UniversalAlgorithm } from "./compose.js";
 import { orderHandlerMiddleware } from "./OrderHandler.js";
 import { Context } from "./Context.js";
 import { defaultLogger, type Logger } from "./Logger.js";
@@ -43,7 +43,7 @@ export class TradingBot {
   private readonly tradeProvider: TradeProvider;
   private readonly newsProvider?: NewsProvider | undefined;
   private readonly router: Router;
-  private readonly preRoute: Algorithm[] = [];
+  private readonly preRoute: UniversalAlgorithm[] = [];
   private readonly logger: Logger;
   private readonly symbols: string[];
 
@@ -92,10 +92,13 @@ export class TradingBot {
    * Add global middleware applied to all events.
    * Global middleware runs before route-specific middleware.
    *
-   * @param middleware - Algorithm functions to add
+   * Business logic: Only universal algorithms (working with any event type) can be
+   * added globally. Event-specific algorithms must use route methods (market, order, news).
+   *
+   * @param middleware - Universal algorithm functions to add
    * @returns This agent for chaining
    */
-  use(...middleware: Algorithm[]): this {
+  use(...middleware: UniversalAlgorithm[]): this {
     this.preRoute.push(...middleware);
     return this;
   }

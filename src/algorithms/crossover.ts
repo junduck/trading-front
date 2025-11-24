@@ -1,4 +1,4 @@
-import type { Algorithm } from "../core/compose.js";
+import type { MarketAlgorithm } from "../core/compose.js";
 import type { MacdValue } from "./macd.js";
 
 /** Crossover signal type */
@@ -39,18 +39,24 @@ export interface CrossoverOptions {
  * - Only processes market events (indicators require price data)
  *
  * @param options - Crossover detection parameters
- * @returns Algorithm middleware function
+ * @returns Market algorithm middleware function (only works with market events)
  *
  * @example
  * ```ts
  * // Detect MACD histogram crossovers
- * agent.use(macd());
- * agent.use(crossover());
+ * agent.market({
+ *   strategy: [
+ *     macd(),
+ *     crossover(),
+ *   ]
+ * });
  *
  * // Access crossover signals in strategy
  * agent.market({
  *   symbol: "AAPL",
  *   strategy: [
+ *     macd(),
+ *     crossover(),
  *     async (ctx) => {
  *       const signals = ctx.state.get("crossover") as Map<string, CrossoverValue>;
  *       const signal = signals?.get("AAPL");
@@ -64,7 +70,7 @@ export interface CrossoverOptions {
  * });
  * ```
  */
-export function crossover(options: CrossoverOptions = {}): Algorithm {
+export function crossover(options: CrossoverOptions = {}): MarketAlgorithm {
   const {
     sourceKey = "macd",
     targetKey = "crossover",
@@ -78,58 +84,56 @@ export function crossover(options: CrossoverOptions = {}): Algorithm {
 
   return async (ctx, next) => {
     // Business logic: Crossover detection requires indicator values from market events.
-    // Order and news events don't provide the necessary price-based indicators.
-    if (ctx.event.type === "market") {
-      const sourceData = ctx.state.get(sourceKey) as
-        | Map<string, MacdValue>
-        | undefined;
+    // ctx.event is guaranteed to be MarketEvent by type system.
+    const sourceData = ctx.state.get(sourceKey) as
+      | Map<string, MacdValue>
+      | undefined;
 
-      if (!sourceData) {
-        // No source data available, skip crossover detection
-        await next();
-        return;
-      }
-
-      const crossoverSignals = new Map<string, CrossoverValue>();
-
-      for (const [symbol, indicatorValue] of sourceData) {
-        const currentValue = indicatorValue[field] as number;
-        const prevValue = previousValues.get(symbol);
-
-        if (prevValue === undefined) {
-          // First observation for this symbol, no crossover possible yet
-          previousValues.set(symbol, currentValue);
-          crossoverSignals.set(symbol, {
-            signal: "none",
-            current: currentValue,
-            previous: currentValue,
-          });
-          continue;
-        }
-
-        // Business logic: Detect crossovers by comparing previous and current values
-        // against threshold. Bullish = crossing above, bearish = crossing below.
-        let signal: CrossoverSignal = "none";
-
-        if (prevValue <= threshold && currentValue > threshold) {
-          signal = "bullish";
-        } else if (prevValue >= threshold && currentValue < threshold) {
-          signal = "bearish";
-        }
-
-        crossoverSignals.set(symbol, {
-          signal,
-          current: currentValue,
-          previous: prevValue,
-        });
-
-        // Update previous value for next event
-        previousValues.set(symbol, currentValue);
-      }
-
-      // Store crossover signals in context state for downstream algorithms
-      ctx.state.set(targetKey, crossoverSignals);
+    if (!sourceData) {
+      // No source data available, skip crossover detection
+      await next();
+      return;
     }
+
+    const crossoverSignals = new Map<string, CrossoverValue>();
+
+    for (const [symbol, indicatorValue] of sourceData) {
+      const currentValue = indicatorValue[field] as number;
+      const prevValue = previousValues.get(symbol);
+
+      if (prevValue === undefined) {
+        // First observation for this symbol, no crossover possible yet
+        previousValues.set(symbol, currentValue);
+        crossoverSignals.set(symbol, {
+          signal: "none",
+          current: currentValue,
+          previous: currentValue,
+        });
+        continue;
+      }
+
+      // Business logic: Detect crossovers by comparing previous and current values
+      // against threshold. Bullish = crossing above, bearish = crossing below.
+      let signal: CrossoverSignal = "none";
+
+      if (prevValue <= threshold && currentValue > threshold) {
+        signal = "bullish";
+      } else if (prevValue >= threshold && currentValue < threshold) {
+        signal = "bearish";
+      }
+
+      crossoverSignals.set(symbol, {
+        signal,
+        current: currentValue,
+        previous: prevValue,
+      });
+
+      // Update previous value for next event
+      previousValues.set(symbol, currentValue);
+    }
+
+    // Store crossover signals in context state for downstream algorithms
+    ctx.state.set(targetKey, crossoverSignals);
 
     await next();
   };

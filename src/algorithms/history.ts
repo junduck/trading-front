@@ -1,5 +1,5 @@
 import { CircularBuffer, type MarketQuote } from "@junduck/trading-core";
-import type { Algorithm } from "../core/compose.js";
+import type { MarketAlgorithm } from "../core/compose.js";
 
 /** Options for History algorithm */
 export interface HistoryOptions {
@@ -19,17 +19,18 @@ export interface HistoryOptions {
  * - Downstream algorithms can access historical data for indicators or analysis
  *
  * @param options - History configuration (maxLength required)
- * @returns Algorithm middleware function
+ * @returns Market algorithm middleware function (only works with market events)
  *
  * @example
  * ```ts
  * // Store last 100 market data points per symbol
- * agent.use(history({ maxLength: 100 }));
+ * agent.market({ strategy: [history({ maxLength: 100 })] });
  *
  * // Access history in strategy
  * agent.market({
  *   symbol: "AAPL",
  *   strategy: [
+ *     history({ maxLength: 100 }),
  *     async (ctx) => {
  *       const history = ctx.state.get("history") as Map<string, CircularBuffer<MarketQuote>>;
  *       const aaplHistory = history?.get("AAPL");
@@ -42,7 +43,7 @@ export interface HistoryOptions {
  * });
  * ```
  */
-export function history(options: HistoryOptions): Algorithm {
+export function history(options: HistoryOptions): MarketAlgorithm {
   const { maxLength, stateKey = "history" } = options;
 
   // Business logic: Maintain circular buffers per symbol to track historical market data.
@@ -50,23 +51,22 @@ export function history(options: HistoryOptions): Algorithm {
   const buffers = new Map<string, CircularBuffer<MarketQuote>>();
 
   return async (ctx, next) => {
-    // Business logic: Only store market data, as history is for price/volume tracking
-    if (ctx.event.type === "market") {
-      for (const quote of ctx.event.marketData) {
-        const { symbol } = quote;
+    // Business logic: Store market data in circular buffers for price/volume tracking
+    // ctx.event is guaranteed to be MarketEvent by type system
+    for (const quote of ctx.event.marketData) {
+      const { symbol } = quote;
 
-        // Initialize buffer for new symbols
-        if (!buffers.has(symbol)) {
-          buffers.set(symbol, new CircularBuffer<MarketQuote>(maxLength));
-        }
-
-        // Store the quote in the circular buffer
-        buffers.get(symbol)!.push(quote);
+      // Initialize buffer for new symbols
+      if (!buffers.has(symbol)) {
+        buffers.set(symbol, new CircularBuffer<MarketQuote>(maxLength));
       }
 
-      // Store buffers in context state for downstream algorithms
-      ctx.state.set(stateKey, buffers);
+      // Store the quote in the circular buffer
+      buffers.get(symbol)!.push(quote);
     }
+
+    // Store buffers in context state for downstream algorithms
+    ctx.state.set(stateKey, buffers);
 
     await next();
   };

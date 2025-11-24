@@ -13,7 +13,8 @@ import {
 } from "@junduck/trading-core";
 import { TradeProvider } from "../providers/TradeProvider.js";
 import type { OrderEvent } from "../types/Events.js";
-import type { Algorithm } from "../core/compose.js";
+import type { MarketAlgorithm } from "../core/compose.js";
+import { TradingErrors } from "../core/TradingError.js";
 
 export interface BacktestConfig {
   /** Initial cash balance */
@@ -53,14 +54,26 @@ export class BacktestProvider extends TradeProvider {
 
   /**
    * Returns middleware that matches orders with market data.
-   * Register this as first middleware in TradingBot.
+   * Register this as first middleware in market routes.
+   *
+   * @returns Market algorithm middleware function (only works with market events)
+   *
+   * @example
+   * ```ts
+   * const backtest = new BacktestProvider({ initialCash: 100000, commissionRate: 0.001 });
+   *
+   * bot.market({
+   *   strategy: [
+   *     backtest.onMarketData(),
+   *     // Your trading strategy here
+   *   ]
+   * });
+   * ```
    */
-  onMarketData(): Algorithm {
+  onMarketData(): MarketAlgorithm {
     return async (ctx, next) => {
-      const event = ctx.event;
-      if (event.type === "market") {
-        await this.processPendingOrders(event.marketData, event.timestamp);
-      }
+      // ctx.event is guaranteed to be MarketEvent by type system
+      await this.processPendingOrders(ctx.event.marketData, ctx.event.timestamp);
       await next();
     };
   }
@@ -94,7 +107,12 @@ export class BacktestProvider extends TradeProvider {
   async getOrder(orderId: string): Promise<Order> {
     const order = this.pendingOrders.get(orderId);
     if (!order) {
-      throw new Error(`Order ${orderId} not found`);
+      throw TradingErrors.provider({
+        message: `Order ${orderId} not found`,
+        sourceName: "BacktestProvider",
+        severity: "recover",
+        category: "execution",
+      });
     }
     return order;
   }
@@ -147,7 +165,12 @@ export class BacktestProvider extends TradeProvider {
   async amendOrder(orderId: string, updates: Partial<Order>): Promise<Order> {
     const order = this.pendingOrders.get(orderId);
     if (!order) {
-      throw new Error(`Order ${orderId} not found`);
+      throw TradingErrors.provider({
+        message: `Order ${orderId} not found`,
+        sourceName: "BacktestProvider",
+        severity: "recover",
+        category: "execution",
+      });
     }
 
     if (updates.quantity !== undefined) {

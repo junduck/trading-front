@@ -1,4 +1,4 @@
-import type { Algorithm } from "../core/compose.js";
+import type { UniversalAlgorithm } from "../core/compose.js";
 
 /** Options for position printer */
 export interface PositionPrinterOptions {
@@ -24,7 +24,7 @@ export interface PositionPrinterOptions {
  * - Useful for monitoring portfolio changes during backtesting and live trading
  *
  * @param options - Configuration for what to print
- * @returns Algorithm middleware function
+ * @returns Universal algorithm middleware function (works with all event types)
  *
  * @example
  * ```ts
@@ -35,7 +35,7 @@ export interface PositionPrinterOptions {
  * agent.use(positionPrinter({ printShort: false, printSummary: false }));
  * ```
  */
-export function positionPrinter(options: PositionPrinterOptions = {}): Algorithm {
+export function positionPrinter(options: PositionPrinterOptions = {}): UniversalAlgorithm {
   const {
     printLong = true,
     printShort = true,

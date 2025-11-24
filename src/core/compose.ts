@@ -1,5 +1,6 @@
 import type { Context } from "./Context.js";
 import { TradingErrors } from "./TradingError.js";
+import type { Event, MarketEvent, OrderEvent, NewsEvent } from "../types/Events.js";
 
 /**
  * Next function to call the next algorithm in the chain.
@@ -10,24 +11,51 @@ export type Next = () => Promise<void>;
  * Algorithm function signature.
  * Receives a context and a next algorithm to continue the chain.
  *
- * Event type is determined at runtime via router tag dispatch.
- * Use TypeScript type guards if you need to narrow event types.
+ * @template E - Event type this algorithm is compatible with
+ *
+ * Event type is enforced at compile-time via generics.
+ * Use specific types (MarketAlgorithm, OrderAlgorithm) to restrict event compatibility.
  */
-export type Algorithm = (ctx: Context, next: Next) => Promise<void>;
+export type Algorithm<E extends Event = Event> = (ctx: Context<E>, next: Next) => Promise<void>;
+
+/**
+ * Algorithm that only works with market events.
+ * Use this for algorithms that need access to marketData.
+ */
+export type MarketAlgorithm = Algorithm<MarketEvent>;
+
+/**
+ * Algorithm that only works with order events.
+ * Use this for algorithms that need access to order state/execution.
+ */
+export type OrderAlgorithm = Algorithm<OrderEvent>;
+
+/**
+ * Algorithm that only works with news events.
+ * Use this for algorithms that need access to news data.
+ */
+export type NewsAlgorithm = Algorithm<NewsEvent>;
+
+/**
+ * Universal algorithm that works with any event type.
+ * Use this for cross-cutting concerns like logging or metrics.
+ */
+export type UniversalAlgorithm = Algorithm<Event>;
 
 /**
  * A stack of algorithms composes a strategy for specific event
  */
-export type Strategy = Algorithm[];
+export type Strategy<E extends Event = Event> = Algorithm<E>[];
 
 /**
  * Compose multiple algorithms into a single algorithm function.
  * Executes algorithm in order, with each calling next() to continue.
  *
+ * @template E - Event type for the composed strategy
  * @param strat - Array of algorithm to compose
  * @returns A single composed algorithm function
  */
-export function compose(strat: Strategy): Algorithm {
+export function compose<E extends Event = Event>(strat: Strategy<E>): Algorithm<E> {
   // Composition-time validation errors (before event loop starts)
   // These are programming errors and should fail fast with standard Error
   if (!Array.isArray(strat)) {
@@ -40,7 +68,7 @@ export function compose(strat: Strategy): Algorithm {
     }
   }
 
-  return async (ctx: Context, next: Next) => {
+  return async (ctx: Context<E>, next: Next) => {
     let index = -1;
 
     const dispatch = async (i: number): Promise<void> => {

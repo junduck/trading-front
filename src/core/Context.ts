@@ -49,12 +49,14 @@ export interface PendingAction {
  * At the end of the middleware chain, pendingActions are executed
  * (similar to how Koa handles res.body).
  *
- * Event type is determined at runtime via router tag dispatch.
+ * @template E - Event type for this context (MarketEvent, OrderEvent, NewsEvent, or Event)
+ *
+ * Event type is enforced at compile-time via generics.
  * Router ensures correct event type for each strategy.
  */
-export class Context {
-  /** Current event being processed (type determined by router) */
-  readonly event: Event;
+export class Context<E extends Event = Event> {
+  /** Current event being processed (typed to specific event) */
+  readonly event: E;
 
   /** Current position state (request) */
   readonly position: Position;
@@ -196,7 +198,7 @@ export class Context {
   private trackingIdCounter = 0;
 
   constructor(options: {
-    event: Event;
+    event: E;
     position: Position;
     snapshot: MarketSnapshot;
     dataProvider: DataProvider;

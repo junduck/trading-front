@@ -1,5 +1,5 @@
 import { EMA } from "@junduck/trading-core";
-import type { Algorithm } from "../core/compose.js";
+import type { MarketAlgorithm } from "../core/compose.js";
 
 /** MACD values for a symbol */
 export interface MacdValue {
@@ -43,20 +43,21 @@ export interface MacdOptions {
  * - Only processes market events (price-based indicator)
  *
  * @param options - MACD calculation parameters
- * @returns Algorithm middleware function
+ * @returns Market algorithm middleware function (only works with market events)
  *
  * @example
  * ```ts
  * // Use default periods (12, 26, 9)
- * agent.use(macd());
+ * agent.market({ strategy: [macd()] });
  *
  * // Custom periods
- * agent.use(macd({ fastPeriod: 8, slowPeriod: 21, signalPeriod: 5 }));
+ * agent.market({ strategy: [macd({ fastPeriod: 8, slowPeriod: 21, signalPeriod: 5 })] });
  *
  * // Access MACD values in strategy
  * agent.market({
  *   symbol: "AAPL",
  *   strategy: [
+ *     macd(),
  *     async (ctx) => {
  *       const macdValues = ctx.state.get("macd") as Map<string, MacdValue>;
  *       const aapl = macdValues?.get("AAPL");
@@ -71,7 +72,7 @@ export interface MacdOptions {
  * });
  * ```
  */
-export function macd(options: MacdOptions = {}): Algorithm {
+export function macd(options: MacdOptions = {}): MarketAlgorithm {
   const {
     fastPeriod = 12,
     slowPeriod = 26,
@@ -87,64 +88,62 @@ export function macd(options: MacdOptions = {}): Algorithm {
   const signalEmas = new Map<string, EMA>();
 
   return async (ctx, next) => {
-    // Business logic: MACD is a price-based indicator, only relevant for market events.
-    // Order and news events don't provide price updates for calculation.
-    if (ctx.event.type === "market") {
-      const macdValues = new Map<string, MacdValue>();
+    // Business logic: MACD is a price-based indicator for market events.
+    // ctx.event is guaranteed to be MarketEvent by type system.
+    const macdValues = new Map<string, MacdValue>();
 
-      for (const quote of ctx.event.marketData) {
-        const { symbol, price } = quote;
+    for (const quote of ctx.event.marketData) {
+      const { symbol, price } = quote;
 
-        // Skip quotes with undefined prices (data integrity check)
-        if (price === undefined) continue;
+      // Skip quotes with undefined prices (data integrity check)
+      if (price === undefined) continue;
 
-        // Initialize EMA calculators for new symbols.
-        // Business logic: Online EMA algorithms maintain internal state,
-        // so each symbol needs dedicated instances to track its price history.
-        if (!fastEmas.has(symbol)) {
-          fastEmas.set(symbol, new EMA({ period: fastPeriod }));
-          slowEmas.set(symbol, new EMA({ period: slowPeriod }));
-          signalEmas.set(symbol, new EMA({ period: signalPeriod }));
-        }
-
-        const fastEma = fastEmas.get(symbol)!;
-        const slowEma = slowEmas.get(symbol)!;
-        const signalEma = signalEmas.get(symbol)!;
-
-        // Update EMAs with current price
-        const fastValue = fastEma.update(price);
-        const slowValue = slowEma.update(price);
-
-        // Business logic: MACD line = fast EMA - slow EMA
-        // Measures the convergence/divergence between short-term and long-term trends.
-        // Positive values indicate bullish momentum, negative values indicate bearish momentum.
-        const macdLine = fastValue - slowValue;
-
-        // Business logic: Signal line = EMA of MACD line
-        // Smooths the MACD to generate crossover signals. When MACD crosses above
-        // signal, it's a bullish signal; crossing below is bearish.
-        const signalValue = signalEma.update(macdLine);
-
-        // Business logic: Histogram = MACD - Signal
-        // Represents the distance between MACD and signal lines. Growing histogram
-        // indicates strengthening momentum, shrinking indicates weakening.
-        // Zero-crossings are traditional buy/sell signals.
-        const histogram = macdLine - signalValue;
-
-        macdValues.set(symbol, {
-          macd: macdLine,
-          signal: signalValue,
-          histogram,
-          fastEma: fastValue,
-          slowEma: slowValue,
-        });
+      // Initialize EMA calculators for new symbols.
+      // Business logic: Online EMA algorithms maintain internal state,
+      // so each symbol needs dedicated instances to track its price history.
+      if (!fastEmas.has(symbol)) {
+        fastEmas.set(symbol, new EMA({ period: fastPeriod }));
+        slowEmas.set(symbol, new EMA({ period: slowPeriod }));
+        signalEmas.set(symbol, new EMA({ period: signalPeriod }));
       }
 
-      // Store calculated values in context state for downstream algorithms.
-      // Business logic: State is event-scoped, so values are fresh for each event
-      // and won't leak between different event processing cycles.
-      ctx.state.set(stateKey, macdValues);
+      const fastEma = fastEmas.get(symbol)!;
+      const slowEma = slowEmas.get(symbol)!;
+      const signalEma = signalEmas.get(symbol)!;
+
+      // Update EMAs with current price
+      const fastValue = fastEma.update(price);
+      const slowValue = slowEma.update(price);
+
+      // Business logic: MACD line = fast EMA - slow EMA
+      // Measures the convergence/divergence between short-term and long-term trends.
+      // Positive values indicate bullish momentum, negative values indicate bearish momentum.
+      const macdLine = fastValue - slowValue;
+
+      // Business logic: Signal line = EMA of MACD line
+      // Smooths the MACD to generate crossover signals. When MACD crosses above
+      // signal, it's a bullish signal; crossing below is bearish.
+      const signalValue = signalEma.update(macdLine);
+
+      // Business logic: Histogram = MACD - Signal
+      // Represents the distance between MACD and signal lines. Growing histogram
+      // indicates strengthening momentum, shrinking indicates weakening.
+      // Zero-crossings are traditional buy/sell signals.
+      const histogram = macdLine - signalValue;
+
+      macdValues.set(symbol, {
+        macd: macdLine,
+        signal: signalValue,
+        histogram,
+        fastEma: fastValue,
+        slowEma: slowValue,
+      });
     }
+
+    // Store calculated values in context state for downstream algorithms.
+    // Business logic: State is event-scoped, so values are fresh for each event
+    // and won't leak between different event processing cycles.
+    ctx.state.set(stateKey, macdValues);
 
     await next();
   };

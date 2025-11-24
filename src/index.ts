@@ -2,7 +2,15 @@
 export { TradingBot } from "./core/TradingBot.js";
 export { Context } from "./core/Context.js";
 export { Router } from "./core/Router.js";
-export { compose, type Algorithm } from "./core/compose.js";
+export {
+  compose,
+  type Algorithm,
+  type MarketAlgorithm,
+  type OrderAlgorithm,
+  type NewsAlgorithm,
+  type UniversalAlgorithm,
+  type Strategy,
+} from "./core/compose.js";
 
 // Error handling
 export {
@@ -38,6 +46,8 @@ export {
   type PositionPrinterOptions,
   eventCounter,
   type EventCounterOptions,
+  history,
+  type HistoryOptions,
 } from "./algorithms/index.js";
 
 // Backtest

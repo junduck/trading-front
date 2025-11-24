@@ -11,8 +11,8 @@ import type { Strategy } from "./compose.js";
  * Options for routing market events.
  */
 export interface MarketRouteOptions {
-  /** Strategy to execute */
-  strategy: Strategy;
+  /** Strategy to execute (market-specific or universal algorithms) */
+  strategy: Strategy<MarketEvent>;
   /** Single symbol to filter */
   symbol?: string;
   /** Multiple symbols to filter */
@@ -25,8 +25,8 @@ export interface MarketRouteOptions {
  * Options for routing order events.
  */
 export interface OrderRouteOptions {
-  /** Strategy to execute */
-  strategy: Strategy;
+  /** Strategy to execute (order-specific or universal algorithms) */
+  strategy: Strategy<OrderEvent>;
   /** Single status to filter */
   status?: OrderStatus;
   /** Multiple statuses to filter */
@@ -39,8 +39,8 @@ export interface OrderRouteOptions {
  * Options for routing news events.
  */
 export interface NewsRouteOptions {
-  /** Strategy to execute */
-  strategy: Strategy;
+  /** Strategy to execute (news-specific or universal algorithms) */
+  strategy: Strategy<NewsEvent>;
   /** Custom filter function */
   filter?: (event: NewsEvent) => boolean;
 }
@@ -50,7 +50,7 @@ export interface NewsRouteOptions {
  */
 interface RouteHandler<T extends Event> {
   filter?: (event: T) => boolean;
-  strategy: Strategy;
+  strategy: Strategy<T>;
 }
 
 /**
@@ -136,6 +136,10 @@ export class Router {
    * Find all routes that match the given event using tag dispatch.
    * Each route is a stack of algorithms that should be executed as an atomic strategy.
    *
+   * Business logic: Type assertions are safe here because the router guarantees
+   * that market strategies only match MarketEvents, order strategies only match OrderEvents, etc.
+   * The tag dispatch ensures event/strategy compatibility at runtime.
+   *
    * @param event - Event to match against routes
    * @returns Array of matching routes, where each route is an array of algorithms
    */
@@ -147,7 +151,8 @@ export class Router {
       case "market":
         for (const route of this.marketRoutes) {
           if (!route.filter || route.filter(event)) {
-            matches.push(route.strategy);
+            // Safe: MarketEvent strategies can be treated as universal strategies at runtime
+            matches.push(route.strategy as Strategy);
           }
         }
         break;
@@ -155,7 +160,8 @@ export class Router {
       case "order":
         for (const route of this.orderRoutes) {
           if (!route.filter || route.filter(event)) {
-            matches.push(route.strategy);
+            // Safe: OrderEvent strategies can be treated as universal strategies at runtime
+            matches.push(route.strategy as Strategy);
           }
         }
         break;
@@ -163,7 +169,8 @@ export class Router {
       case "news":
         for (const route of this.newsRoutes) {
           if (!route.filter || route.filter(event)) {
-            matches.push(route.strategy);
+            // Safe: NewsEvent strategies can be treated as universal strategies at runtime
+            matches.push(route.strategy as Strategy);
           }
         }
         break;

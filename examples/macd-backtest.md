@@ -65,7 +65,7 @@ Each middleware can be tested independently:
 const algo = crossover();
 const ctx = createContext(macdData);
 await algo(ctx, async () => {});
-expect(ctx.state.get("crossover").get("AAPL").signal).toBe("bullish");
+expect(ctx.get("crossover", "AAPL").signal).toBe("bullish");
 ```
 
 ### 4. **Clean Separation of Concerns**
@@ -93,10 +93,10 @@ See [macd-backtest.ts](./macd-backtest.ts) for a complete example.
 ```ts
 import { TradingBot, macd, crossover } from "../src/index.js";
 
-const bot = new TradingBot({ dataProvider, tradeProvider, symbols: ["AAPL"] });
+const bot = new TradingBot({ dataProvider, backtester, symbols: ["AAPL"] });
 
 // Compose middleware pipeline
-bot.use(tradeProvider.onMarketData());
+bot.use(backtester.onMarketData()); // backtester intercepts market data as first middleware to match and fill order with new market data
 bot.use(macd());           // Write state.macd
 bot.use(crossover());      // Read state.macd, write state.crossover
 
@@ -107,7 +107,7 @@ bot.market({
     async (ctx) => {
       const signals = ctx.state.get("crossover");
       const signal = signals?.get("AAPL");
-      const price = ctx.snapshot.price.get("AAPL");
+      const price = ctx.price("AAPL");
       const cash = ctx.position.cash;
 
       if (signal?.signal === "bullish") {

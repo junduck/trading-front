@@ -90,7 +90,7 @@ async function main() {
         }
 
         // Execute on bullish crossover: buy with all cash
-        const currentPosition = q.qty(ctx.position, "000001");
+        const currentPosition = ctx.holdingQty("000001");
 
         if (signal.signal === "bullish" && currentPosition === 0) {
           const quantity = maxQty(ctx.position, price);
@@ -144,8 +144,7 @@ async function main() {
 
         if (!state || state.symbol !== "000001") return;
 
-        const currentPosition = q.qty(ctx.position, "000001");
-        console.log(`   ✓ Position: ${currentPosition} shares`);
+        console.log(`   ✓ Position: ${ctx.holdingQty("000001")} shares`);
       },
     ],
   });

@@ -1,4 +1,4 @@
-import type { Position, MarketSnapshot, Order } from "@junduck/trading-core";
+import { q, type Position, type MarketSnapshot, type Order } from "@junduck/trading-core";
 import type { Event } from "../types/Events.js";
 import type { DataProvider } from "../providers/DataProvider.js";
 import type { TradeProvider } from "../providers/TradeProvider.js";
@@ -59,8 +59,61 @@ export class Context {
   /** Current position state (request) */
   readonly position: Position;
 
+  /** Available cash from position */
+  get cash(): number {
+    return this.position.cash;
+  }
+
+  /** Total commission paid */
+  get totalCommission(): number {
+    return this.position.totalCommission;
+  }
+
+  /** Total realised profit and loss */
+  get realisedPnL(): number {
+    return this.position.realisedPnL;
+  }
+
+  // Position query helpers (bound from q)
+  /** Get holding quantity (long position) */
+  readonly holdingQty = (symbol: string) => q.qty(this.position, symbol);
+  /** Get holding total cost (long position) */
+  readonly holdingCost = (symbol: string) => q.cost(this.position, symbol);
+  /** Get long position quantity */
+  readonly longQty = (symbol: string) => q.longQty(this.position, symbol);
+  /** Get short position quantity */
+  readonly shortQty = (symbol: string) => q.shortQty(this.position, symbol);
+  /** Get long position total cost */
+  readonly longCost = (symbol: string) => q.longCost(this.position, symbol);
+  /** Get short position total proceeds */
+  readonly shortProceeds = (symbol: string) => q.shortProceeds(this.position, symbol);
+  /** Get long position realised PnL */
+  readonly longPnL = (symbol: string) => q.longPnL(this.position, symbol);
+  /** Get short position realised PnL */
+  readonly shortPnL = (symbol: string) => q.shortPnL(this.position, symbol);
+  /** Check if holding exists (long position) */
+  readonly hasHolding = (symbol: string) => q.hasLong(this.position, symbol);
+  /** Check if short position exists */
+  readonly hasShort = (symbol: string) => q.hasShort(this.position, symbol);
+
   /** Current LOCF market snapshot (request) */
   readonly snapshot: MarketSnapshot;
+
+  /**
+   * Get the current price for a symbol from the snapshot.
+   *
+   * @param symbol - Symbol to look up
+   * @returns The price, or undefined if not available
+   *
+   * @example
+   * ```ts
+   * const price = ctx.price("000001");
+   * if (price) { ... }
+   * ```
+   */
+  price(symbol: string): number | undefined {
+    return this.snapshot.price.get(symbol);
+  }
 
   /** Data provider for querying additional market data */
   readonly dataProvider: DataProvider;
@@ -132,22 +185,6 @@ export class Context {
    */
   set(key: string, value: unknown): void {
     this.state.set(key, value);
-  }
-
-  /**
-   * Get the current price for a symbol from the snapshot.
-   *
-   * @param symbol - Symbol to look up
-   * @returns The price, or undefined if not available
-   *
-   * @example
-   * ```ts
-   * const price = ctx.price("000001");
-   * if (price) { ... }
-   * ```
-   */
-  price(symbol: string): number | undefined {
-    return this.snapshot.price.get(symbol);
   }
 
   /**

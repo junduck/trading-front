@@ -1,8 +1,9 @@
 import {
   type Position,
-  type MarketSnapshot,
+  type MarketQuote,
   processFill,
-} from "@junduck/trading-core";
+  createPosition,
+} from "@junduck/trading-core/trading";
 import type {
   Event,
   MarketEvent,
@@ -23,6 +24,7 @@ import { orderHandlerMiddleware } from "./OrderHandler.js";
 import { Context } from "./Context.js";
 import { defaultLogger, type Logger } from "./Logger.js";
 import { TradingError } from "./TradingError.js";
+import { Snapshot } from "./Snapshot.js";
 
 /**
  * Event handler for agent events.
@@ -42,13 +44,14 @@ export class TradingBot {
   private readonly dataProvider: DataProvider;
   private readonly tradeProvider: TradeProvider;
   private readonly newsProvider?: NewsProvider | undefined;
-  private readonly router: Router;
+
+  private readonly router = new Router();
   private readonly preRoute: UniversalAlgorithm[] = [];
-  private readonly logger: Logger;
+  private readonly logger;
   private readonly symbols: string[];
 
   private position: Position;
-  private snapshot: MarketSnapshot;
+  private snapshot: Snapshot;
   private running = false;
 
   // Business logic: Event queues prevent race conditions when events arrive faster than processing.
@@ -66,26 +69,20 @@ export class TradingBot {
     tradeProvider: TradeProvider;
     newsProvider?: NewsProvider;
     symbols?: string[];
-    initialSnapshot?: MarketSnapshot;
+    initialQuotes?: MarketQuote[];
     logger?: Logger;
   }) {
     this.dataProvider = opts.dataProvider;
     this.tradeProvider = opts.tradeProvider;
     this.newsProvider = opts.newsProvider;
     this.symbols = opts.symbols ?? [];
-    this.router = new Router();
     this.logger = opts.logger ?? defaultLogger;
 
-    this.position = {
-      cash: 0,
-      totalCommission: 0,
-      realisedPnL: 0,
-      modified: new Date(),
-    };
-    this.snapshot = opts.initialSnapshot ?? {
-      price: new Map(),
-      timestamp: new Date(),
-    };
+    this.position = createPosition();
+    this.snapshot = new Snapshot();
+    if (opts.initialQuotes) {
+      this.snapshot.updateQuotes(opts.initialQuotes, this.position);
+    }
   }
 
   /**
@@ -237,9 +234,9 @@ export class TradingBot {
   }
 
   /**
-   * Get the current market snapshot.
+   * Get the current snapshot.
    */
-  getSnapshot(): MarketSnapshot {
+  getSnapshot(): Snapshot {
     return this.snapshot;
   }
 
@@ -278,7 +275,7 @@ export class TradingBot {
     // Business logic: Chain this event's processing to the previous event's completion.
     // The queue ensures sequential processing: event N+1 waits for event N to finish.
     this.marketQueue = this.marketQueue.then(async () => {
-      this.updateSnapshot(event);
+      this.snapshot.updateQuotes(event.marketData, this.position);
       await this.handleEvent(event);
     });
 
@@ -299,7 +296,11 @@ export class TradingBot {
     // This allows market and order events to process concurrently while
     // maintaining sequential order within each event type.
     this.orderQueue = this.orderQueue.then(async () => {
-      this.updatePosition(event);
+      const status = event.state?.status;
+      if (status === "FILLED" || status === "PARTIAL") {
+        processFill(this.position, event.effect!.fill);
+        this.snapshot.updatePosition(event.effect!.fill.symbol, this.position);
+      }
       await this.handleEvent(event);
     });
 
@@ -403,40 +404,6 @@ export class TradingBot {
     }
 
     await this.emit("event_processed", event);
-  }
-
-  /**
-   * Update snapshot from market event.
-   *
-   * @param event - Market event
-   */
-  private updateSnapshot(event: MarketEvent): void {
-    for (const data of event.marketData) {
-      this.snapshot.price.set(data.symbol, data.price);
-    }
-    this.snapshot.timestamp = event.timestamp;
-  }
-
-  /**
-   * Update position from order event.
-   *
-   * @param event - Order event
-   */
-  private updatePosition(event: OrderEvent): void {
-    if (!event.state) return;
-
-    const status = event.state.status;
-    if (status === "FILLED" || status === "PARTIAL") {
-      if (!event.effect) {
-        throw new Error(
-          `OrderEvent with status '${status}' must include execution data. ` +
-            `This indicates a provider bug. Order: ${JSON.stringify(
-              event.state
-            )}`
-        );
-      }
-      processFill(this.position, event.effect.fill);
-    }
   }
 
   /**

@@ -1,9 +1,10 @@
-import { q, type Position, type MarketSnapshot, type Order } from "@junduck/trading-core";
+import { q, type Position, type Order } from "@junduck/trading-core";
 import type { Event } from "../types/Events.js";
 import type { DataProvider } from "../providers/DataProvider.js";
 import type { TradeProvider } from "../providers/TradeProvider.js";
 import type { NewsProvider } from "../providers/NewsProvider.js";
 import type { Logger } from "./Logger.js";
+import type { Snapshot } from "./Snapshot.js";
 
 /**
  * Reason for an order action.
@@ -76,6 +77,7 @@ export class Context<E extends Event = Event> {
     return this.position.realisedPnL;
   }
 
+
   // Position query helpers (bound from q)
   /** Get holding quantity (long position) */
   readonly holdingQty = (symbol: string) => q.qty(this.position, symbol);
@@ -98,23 +100,49 @@ export class Context<E extends Event = Event> {
   /** Check if short position exists */
   readonly hasShort = (symbol: string) => q.hasShort(this.position, symbol);
 
-  /** Current LOCF market snapshot (request) */
-  readonly snapshot: MarketSnapshot;
+  /** Current snapshot with market data and portfolio valuation */
+  readonly snapshot: Snapshot;
 
   /**
-   * Get the current price for a symbol from the snapshot.
-   *
+   * Get the current price for a symbol.
    * @param symbol - Symbol to look up
-   * @returns The price, or undefined if not available
-   *
-   * @example
-   * ```ts
-   * const price = ctx.price("000001");
-   * if (price) { ... }
-   * ```
+   * @returns Price, or 0 if not available
    */
-  price(symbol: string): number | undefined {
-    return this.snapshot.price.get(symbol);
+  price(symbol: string): number {
+    return this.snapshot.price(symbol);
+  }
+
+  /**
+   * Get the market value for a long position.
+   * @param symbol - Symbol to look up
+   * @returns Market value (quantity × price), or 0 if no position
+   */
+  value(symbol: string): number {
+    return this.snapshot.value(symbol);
+  }
+
+  /**
+   * Get the market liability for a short position.
+   * @param symbol - Symbol to look up
+   * @returns Liability (quantity × price), or 0 if no position
+   */
+  liab(symbol: string): number {
+    return this.snapshot.liab(symbol);
+  }
+
+  /**
+   * Get current portfolio equity (cash + market value - liabilities).
+   */
+  get equity(): number {
+    return this.snapshot.equity;
+  }
+
+  /**
+   * Get all market values as a read-only map.
+   * @returns Map of symbol to market value (for long positions)
+   */
+  get marketValue(): ReadonlyMap<string, number> {
+    return this.snapshot.getValueMap();
   }
 
   /** Data provider for querying additional market data */
@@ -200,7 +228,7 @@ export class Context<E extends Event = Event> {
   constructor(options: {
     event: E;
     position: Position;
-    snapshot: MarketSnapshot;
+    snapshot: Snapshot;
     dataProvider: DataProvider;
     tradeProvider: TradeProvider;
     newsProvider?: NewsProvider | undefined;

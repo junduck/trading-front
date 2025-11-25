@@ -77,3 +77,17 @@ export function createLogger(config: LoggerConfig = {}): Logger {
  * Uses environment-based configuration.
  */
 export const defaultLogger: Logger = createLogger();
+
+/**
+ * Null logger that discards all log output.
+ * Use when logging should be disabled.
+ *
+ * @example
+ * ```ts
+ * const bot = new TradingBot({
+ *   logger: nullLogger,
+ *   // ... other config
+ * });
+ * ```
+ */
+export const nullLogger: Logger = pino({ level: "silent" });

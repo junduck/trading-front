@@ -86,7 +86,7 @@ class ExternalRouteBuilder {
 export class TradingBot {
   private readonly dataProvider: DataProvider;
   private readonly tradeProvider: TradeProvider;
-  private readonly externalProvider?: ExternalProvider | undefined;
+  private readonly externalProviders: ExternalProvider[];
 
   private readonly router = new Router();
   private readonly preRoute: UniversalAlgo[] = [];
@@ -100,14 +100,14 @@ export class TradingBot {
   constructor(opts: {
     dataProvider: DataProvider;
     tradeProvider: TradeProvider;
-    externalProvider?: ExternalProvider;
+    externalProviders?: ExternalProvider[];
     symbols?: string[];
     initialQuotes?: MarketQuote[];
     logger?: Logger;
   }) {
     this.dataProvider = opts.dataProvider;
     this.tradeProvider = opts.tradeProvider;
-    this.externalProvider = opts.externalProvider;
+    this.externalProviders = opts.externalProviders ?? [];
     this.symbols = opts.symbols ?? [];
     this.logger = opts.logger ?? defaultLogger;
 
@@ -200,12 +200,10 @@ export class TradingBot {
     const connections = [
       this.dataProvider.connect(this.onMarketEvent.bind(this)),
       this.tradeProvider.connect(this.onOrderEvent.bind(this)),
+      ...this.externalProviders.map((provider) =>
+        provider.connect(this.onExternalEvent.bind(this))
+      ),
     ];
-    if (this.externalProvider) {
-      connections.push(
-        this.externalProvider.connect(this.onExternalEvent.bind(this))
-      );
-    }
     await Promise.all(connections);
 
     this.position = await this.tradeProvider.getPosition();
@@ -213,18 +211,17 @@ export class TradingBot {
     const subs = [
       this.tradeProvider.subscribe(),
       this.dataProvider.subscribeSymbols(this.symbols),
+      ...this.externalProviders.map((provider) => provider.subscribe()),
     ];
-    if (this.externalProvider) {
-      subs.push(this.externalProvider.subscribe());
-    }
     await Promise.all(subs);
 
     this.running = true;
 
-    const begins = [this.dataProvider.begin(), this.tradeProvider.begin()];
-    if (this.externalProvider) {
-      begins.push(this.externalProvider.begin());
-    }
+    const begins = [
+      this.dataProvider.begin(),
+      this.tradeProvider.begin(),
+      ...this.externalProviders.map((provider) => provider.begin()),
+    ];
     await Promise.all(begins);
   }
 
@@ -236,28 +233,25 @@ export class TradingBot {
 
     this.running = false;
 
-    const ends = [this.dataProvider.end(), this.tradeProvider.end()];
-    if (this.externalProvider) {
-      ends.push(this.externalProvider.end());
-    }
+    const ends = [
+      this.dataProvider.end(),
+      this.tradeProvider.end(),
+      ...this.externalProviders.map((provider) => provider.end()),
+    ];
     await Promise.all(ends);
 
     const unsubs = [
       this.dataProvider.unsubscribeSymbols(this.symbols),
       this.tradeProvider.unsubscribe(),
+      ...this.externalProviders.map((provider) => provider.unsubscribe()),
     ];
-    if (this.externalProvider) {
-      unsubs.push(this.externalProvider.unsubscribe());
-    }
     await Promise.all(unsubs);
 
     const disconnections = [
       this.dataProvider.disconnect(),
       this.tradeProvider.disconnect(),
+      ...this.externalProviders.map((provider) => provider.disconnect()),
     ];
-    if (this.externalProvider) {
-      disconnections.push(this.externalProvider.disconnect());
-    }
     await Promise.all(disconnections);
   }
 
@@ -274,19 +268,19 @@ export class TradingBot {
     void Promise.all([
       this.dataProvider.end(),
       this.tradeProvider.end(),
-      ...(this.externalProvider ? [this.externalProvider.end()] : []),
+      ...this.externalProviders.map((provider) => provider.end()),
     ]);
 
     void Promise.all([
       this.dataProvider.unsubscribeSymbols(this.symbols),
       this.tradeProvider.unsubscribe(),
-      ...(this.externalProvider ? [this.externalProvider.unsubscribe()] : []),
+      ...this.externalProviders.map((provider) => provider.unsubscribe()),
     ]);
 
     void Promise.all([
       this.dataProvider.disconnect(),
       this.tradeProvider.disconnect(),
-      ...(this.externalProvider ? [this.externalProvider.disconnect()] : []),
+      ...this.externalProviders.map((provider) => provider.disconnect()),
     ]);
   }
 
@@ -327,7 +321,7 @@ export class TradingBot {
       snapshot: this.snapshot,
       dataProvider: this.dataProvider,
       tradeProvider: this.tradeProvider,
-      externalProvider: this.externalProvider,
+      externalProviders: this.externalProviders,
       logger: this.logger,
     });
 

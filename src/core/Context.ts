@@ -68,8 +68,8 @@ export class Context<E extends Event = Event> {
   /** Trade provider for account info and order submission */
   readonly tradeProvider: TradeProvider;
 
-  /** External provider for external signals */
-  readonly externalProvider?: ExternalProvider | undefined;
+  /** External providers for external signals */
+  readonly externalProviders: ExternalProvider[];
 
   /** Logger for middleware to log messages at different levels */
   readonly logger: Logger;
@@ -96,7 +96,7 @@ export class Context<E extends Event = Event> {
     snapshot: Snapshot;
     dataProvider: DataProvider;
     tradeProvider: TradeProvider;
-    externalProvider?: ExternalProvider | undefined;
+    externalProviders?: ExternalProvider[];
     logger: Logger;
   }) {
     this.event = options.event;
@@ -104,7 +104,7 @@ export class Context<E extends Event = Event> {
     this.snapshot = options.snapshot;
     this.dataProvider = options.dataProvider;
     this.tradeProvider = options.tradeProvider;
-    this.externalProvider = options.externalProvider;
+    this.externalProviders = options.externalProviders ?? [];
     this.logger = options.logger;
   }
 

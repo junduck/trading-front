@@ -181,17 +181,45 @@ export class Context<E extends Event = Event> {
     return this.position.realisedPnL;
   }
 
-  readonly holdingQty = (symbol: string) => q.qty(this.position, symbol);
-  readonly holdingCost = (symbol: string) => q.cost(this.position, symbol);
-  readonly longQty = (symbol: string) => q.longQty(this.position, symbol);
-  readonly shortQty = (symbol: string) => q.shortQty(this.position, symbol);
-  readonly longCost = (symbol: string) => q.longCost(this.position, symbol);
-  readonly shortProceeds = (symbol: string) =>
-    q.shortProceeds(this.position, symbol);
-  readonly longPnL = (symbol: string) => q.longPnL(this.position, symbol);
-  readonly shortPnL = (symbol: string) => q.shortPnL(this.position, symbol);
-  readonly hasHolding = (symbol: string) => q.hasLong(this.position, symbol);
-  readonly hasShort = (symbol: string) => q.hasShort(this.position, symbol);
+  holdingQty(symbol: string): number {
+    return q.qty(this.position, symbol);
+  }
+
+  holdingCost(symbol: string): number {
+    return q.cost(this.position, symbol);
+  }
+
+  longQty(symbol: string): number {
+    return q.longQty(this.position, symbol);
+  }
+
+  shortQty(symbol: string): number {
+    return q.shortQty(this.position, symbol);
+  }
+
+  longCost(symbol: string): number {
+    return q.longCost(this.position, symbol);
+  }
+
+  shortProceeds(symbol: string): number {
+    return q.shortProceeds(this.position, symbol);
+  }
+
+  longPnL(symbol: string): number {
+    return q.longPnL(this.position, symbol);
+  }
+
+  shortPnL(symbol: string): number {
+    return q.shortPnL(this.position, symbol);
+  }
+
+  hasHolding(symbol: string): boolean {
+    return q.hasLong(this.position, symbol);
+  }
+
+  hasShort(symbol: string): boolean {
+    return q.hasShort(this.position, symbol);
+  }
 
   // ================================================================================
   // Valuation

@@ -1,4 +1,4 @@
-import type { UniversalAlgorithm } from "../core/compose.js";
+import type { UniversalAlgo } from "../core/compose.js";
 
 /** Options for position printer */
 export interface PositionPrinterOptions {
@@ -37,7 +37,7 @@ export interface PositionPrinterOptions {
  */
 export function positionPrinter(
   options: PositionPrinterOptions = {}
-): UniversalAlgorithm {
+): UniversalAlgo {
   const {
     printLong = true,
     printShort = true,
@@ -48,23 +48,22 @@ export function positionPrinter(
   return async (ctx, next) => {
     // Business logic: Filter for order events with fill executions.
     // Only fills update the position, other order events (state changes) don't.
-    if (ctx.event.type === "order" && ctx.event.effect) {
-      const effect = ctx.event.effect;
-
-      ctx.logger.info({
-        msg: "Order filled",
-        fillId: effect.fill.id,
-        orderId: effect.fill.orderId,
-        symbol: effect.fill.symbol,
-        side: effect.fill.side,
-        effect: effect.fill.effect,
-        quantity: effect.fill.quantity,
-        price: effect.fill.price,
-        commission: effect.fill.commission,
-        timestamp: effect.fill.created.toISOString(),
-        realisedPnL: effect.realisedPnL,
-        cashflow: effect.cashFlow,
-      });
+    if (ctx.event.type === "order" && ctx.event.fill.length > 0) {
+      // Log each fill
+      for (const fill of ctx.event.fill) {
+        ctx.logger.info({
+          msg: "Order filled",
+          fillId: fill.id,
+          orderId: fill.orderId,
+          symbol: fill.symbol,
+          side: fill.side,
+          effect: fill.effect,
+          quantity: fill.quantity,
+          price: fill.price,
+          commission: fill.commission,
+          timestamp: fill.created.toISOString(),
+        });
+      }
 
       // Print updated position from ctx.position (automatically updated by bot)
       const { position } = ctx;
@@ -131,6 +130,6 @@ export function positionPrinter(
       }
     }
 
-    await next();
+    next();
   };
 }

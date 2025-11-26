@@ -1,5 +1,5 @@
-import { EMA } from "@junduck/trading-core";
-import type { MarketAlgorithm } from "../core/compose.js";
+import { EMA } from "@junduck/trading-core/algorithm";
+import type { MarketAlgo } from "../core/compose.js";
 
 /** MACD values for a symbol */
 export interface MacdValue {
@@ -72,7 +72,7 @@ export interface MacdOptions {
  * });
  * ```
  */
-export function macd(options: MacdOptions = {}): MarketAlgorithm {
+export function macd(options: MacdOptions = {}): MarketAlgo {
   const {
     fastPeriod = 12,
     slowPeriod = 26,
@@ -87,7 +87,7 @@ export function macd(options: MacdOptions = {}): MarketAlgorithm {
   const slowEmas = new Map<string, EMA>();
   const signalEmas = new Map<string, EMA>();
 
-  return async (ctx, next) => {
+  return (ctx, next) => {
     // Business logic: MACD is a price-based indicator for market events.
     // ctx.event is guaranteed to be MarketEvent by type system.
     const macdValues = new Map<string, MacdValue>();
@@ -145,6 +145,6 @@ export function macd(options: MacdOptions = {}): MarketAlgorithm {
     // and won't leak between different event processing cycles.
     ctx.state.set(stateKey, macdValues);
 
-    await next();
+    next();
   };
 }

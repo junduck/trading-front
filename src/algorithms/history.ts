@@ -1,5 +1,5 @@
 import { CircularBuffer, type MarketQuote } from "@junduck/trading-core";
-import type { MarketAlgorithm } from "../core/compose.js";
+import type { MarketAlgo } from "../core/compose.js";
 
 /** Options for History algorithm */
 export interface HistoryOptions {
@@ -8,6 +8,8 @@ export interface HistoryOptions {
   /** State key to store history (default: "history") */
   stateKey?: string;
 }
+
+export type QuoteBuffer = CircularBuffer<MarketQuote>;
 
 /**
  * History tracking middleware that maintains circular buffers of market data per symbol.
@@ -32,8 +34,7 @@ export interface HistoryOptions {
  *   strategy: [
  *     history({ maxLength: 100 }),
  *     async (ctx) => {
- *       const history = ctx.state.get("history") as Map<string, CircularBuffer<MarketQuote>>;
- *       const aaplHistory = history?.get("AAPL");
+ *       const aaplHistory = ctx.get<QuoteBuffer>("history", "APPL");
  *       if (aaplHistory && aaplHistory.length() >= 20) {
  *         const recentPrices = aaplHistory.toArray().slice(-20);
  *         // Analyze recent price movements
@@ -43,14 +44,14 @@ export interface HistoryOptions {
  * });
  * ```
  */
-export function history(options: HistoryOptions): MarketAlgorithm {
+export function history(options: HistoryOptions): MarketAlgo {
   const { maxLength, stateKey = "history" } = options;
 
   // Business logic: Maintain circular buffers per symbol to track historical market data.
   // Each symbol's data stream is independent, requiring separate buffers.
-  const buffers = new Map<string, CircularBuffer<MarketQuote>>();
+  const buffers = new Map<string, QuoteBuffer>();
 
-  return async (ctx, next) => {
+  return (ctx, next) => {
     // Business logic: Store market data in circular buffers for price/volume tracking
     // ctx.event is guaranteed to be MarketEvent by type system
     for (const quote of ctx.event.marketData) {
@@ -68,6 +69,6 @@ export function history(options: HistoryOptions): MarketAlgorithm {
     // Store buffers in context state for downstream algorithms
     ctx.state.set(stateKey, buffers);
 
-    await next();
+    next();
   };
 }

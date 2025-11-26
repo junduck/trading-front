@@ -118,6 +118,16 @@ export class TradingBot {
     }
   }
 
+  /** Get current position (readonly clone) */
+  getPosition(): Position {
+    return structuredClone(this.position);
+  }
+
+  /** Get current snapshot */
+  getSnapshot(): Snapshot {
+    return this.snapshot;
+  }
+
   /**
    * Add global middleware applied to all events.
    *
@@ -290,7 +300,6 @@ export class TradingBot {
   }
 
   private onOrderEvent(event: OrderEvent): void {
-    // Business logic: Apply fills to position before running middleware
     if (event.fill.length > 0) {
       const symbols: string[] = [];
       for (const fill of event.fill) {

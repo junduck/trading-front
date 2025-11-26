@@ -1,4 +1,4 @@
-import type { UniversalAlgorithm } from "../core/compose.js";
+import type { UniversalAlgo } from "../core/compose.js";
 
 /** Options for event counter */
 export interface EventCounterOptions {
@@ -7,7 +7,7 @@ export interface EventCounterOptions {
 }
 
 /**
- * Event counter middleware that demonstrates the middleware call chain pattern.
+ * Event counter middleware that demonstrates the onion pattern.
  *
  * This is a simple demonstration showing how middleware can:
  * - Execute logic before the chain (pre-processing)
@@ -31,12 +31,12 @@ export interface EventCounterOptions {
  * agent.use(eventCounter({ interval: 50 }));
  * ```
  */
-export function eventCounter(options: EventCounterOptions = {}): UniversalAlgorithm {
+export function eventCounter(options: EventCounterOptions = {}): UniversalAlgo {
   const { interval = 100 } = options;
 
   let count = 0;
 
-  return async (ctx, next) => {
+  return (ctx, next) => {
     // Business logic: Pre-processing - runs BEFORE downstream algorithms.
     // This is where you prepare state, log entry, or validate conditions.
     if (ctx.event.type === "market") {
@@ -53,16 +53,16 @@ export function eventCounter(options: EventCounterOptions = {}): UniversalAlgori
     // Business logic: Pass control to next middleware in the chain.
     // This is where the actual trading algorithms run (downstream middleware).
     // Any actions queued by downstream algorithms will be collected here.
-    await next();
+    next();
 
     // Business logic: Post-processing - runs AFTER downstream algorithms complete.
     // This is where you do cleanup, log results, or finalize state.
     // At this point, all pending actions from downstream algorithms are available.
     if (ctx.event.type === "market" && count % interval === 0) {
-      const pendingActions = ctx.getPendingActions();
+      const pending = ctx.getPending();
       ctx.logger.info({
         msg: `Event ${count} processed`,
-        pendingActionsCount: pendingActions.length,
+        pendingOrderActions: pending.length,
       });
     }
   };

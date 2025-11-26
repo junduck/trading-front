@@ -1,4 +1,4 @@
-import type { MarketAlgorithm } from "../core/compose.js";
+import type { MarketAlgo } from "../core/compose.js";
 import type { MacdValue } from "./macd.js";
 
 /** Crossover signal type */
@@ -57,7 +57,7 @@ export interface CrossoverOptions {
  *   strategy: [
  *     macd(),
  *     crossover(),
- *     async (ctx) => {
+ *     (ctx) => {
  *       const signals = ctx.state.get("crossover") as Map<string, CrossoverValue>;
  *       const signal = signals?.get("AAPL");
  *       if (signal?.signal === "bullish") {
@@ -70,7 +70,7 @@ export interface CrossoverOptions {
  * });
  * ```
  */
-export function crossover(options: CrossoverOptions = {}): MarketAlgorithm {
+export function crossover(options: CrossoverOptions = {}): MarketAlgo {
   const {
     sourceKey = "macd",
     targetKey = "crossover",
@@ -82,17 +82,14 @@ export function crossover(options: CrossoverOptions = {}): MarketAlgorithm {
   // Each symbol's price series is independent, so we maintain separate state.
   const previousValues = new Map<string, number>();
 
-  return async (ctx, next) => {
+  return (ctx, next) => {
     // Business logic: Crossover detection requires indicator values from market events.
     // ctx.event is guaranteed to be MarketEvent by type system.
-    const sourceData = ctx.state.get(sourceKey) as
-      | Map<string, MacdValue>
-      | undefined;
+    const sourceData = ctx.get<Map<string, MacdValue>>(sourceKey);
 
     if (!sourceData) {
       // No source data available, skip crossover detection
-      await next();
-      return;
+      return next();
     }
 
     const crossoverSignals = new Map<string, CrossoverValue>();
@@ -135,6 +132,6 @@ export function crossover(options: CrossoverOptions = {}): MarketAlgorithm {
     // Store crossover signals in context state for downstream algorithms
     ctx.state.set(targetKey, crossoverSignals);
 
-    await next();
+    next();
   };
 }

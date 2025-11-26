@@ -118,10 +118,8 @@ export class TradingBot {
   private snapshot: Snapshot;
   private running = false;
 
-  // Each provider has its own queue to ensure sequential processing per event source.
-  private marketQueue = Promise.resolve();
-  private orderQueue = Promise.resolve();
-  private newsQueue = Promise.resolve();
+  // Event queue to ensure sequantial exec
+  private eventQueue = Promise.resolve();
 
   // Event emitter for agent-level events (one handler per event type)
   private readonly eventHandlers: Map<string, AgentEventHandler> = new Map();
@@ -240,13 +238,11 @@ export class TradingBot {
     }
 
     const connections = [
-      this.dataProvider.connect(this.handleMarketEvent.bind(this)),
-      this.tradeProvider.connect(this.handleOrderEvent.bind(this)),
+      this.dataProvider.connect(this.preMarketEvent.bind(this)),
+      this.tradeProvider.connect(this.preOrderEvent.bind(this)),
     ];
     if (this.newsProvider) {
-      connections.push(
-        this.newsProvider.connect(this.handleNewsEvent.bind(this))
-      );
+      connections.push(this.newsProvider.connect(this.preNewsEvent.bind(this)));
     }
     await Promise.all(connections);
 
@@ -317,26 +313,26 @@ export class TradingBot {
   }
 
   /**
-   * Update snapshot before running main dispatch, queued by marketQueue
+   * Update snapshot before running main dispatch, queued by eventQueue
    *
    * @param event - Market event to process
    */
-  private async handleMarketEvent(event: MarketEvent): Promise<void> {
-    this.marketQueue = this.marketQueue.then(async () => {
+  private async preMarketEvent(event: MarketEvent): Promise<void> {
+    this.eventQueue = this.eventQueue.then(async () => {
       this.snapshot.updateQuotes(event.marketData, this.position);
       await this.handleEvent(event);
     });
 
-    await this.marketQueue;
+    await this.eventQueue;
   }
 
   /**
-   * Update position and snapshot before running main dispatch, queued by orderQueue
+   * Update position and snapshot before running main dispatch, queued by eventQueue
    *
    * @param event - Order event to process
    */
-  private async handleOrderEvent(event: OrderEvent): Promise<void> {
-    this.orderQueue = this.orderQueue.then(async () => {
+  private async preOrderEvent(event: OrderEvent): Promise<void> {
+    this.eventQueue = this.eventQueue.then(async () => {
       if (event.fill.length > 0) {
         const symbols: string[] = [];
         for (const fill of event.fill) {
@@ -348,20 +344,20 @@ export class TradingBot {
       await this.handleEvent(event);
     });
 
-    await this.orderQueue;
+    await this.eventQueue;
   }
 
   /**
-   * Run main dispatch, queued by newsQueue
+   * Run main dispatch, queued by eventQueue
    *
    * @param event - News event to process
    */
-  private async handleNewsEvent(event: NewsEvent): Promise<void> {
-    this.newsQueue = this.newsQueue.then(async () => {
+  private async preNewsEvent(event: NewsEvent): Promise<void> {
+    this.eventQueue = this.eventQueue.then(async () => {
       await this.handleEvent(event);
     });
 
-    await this.newsQueue;
+    await this.eventQueue;
   }
 
   /**

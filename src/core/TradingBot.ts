@@ -13,14 +13,15 @@ import type {
 import type { DataProvider } from "../providers/DataProvider.js";
 import type { TradeProvider } from "../providers/TradeProvider.js";
 import type { NewsProvider } from "../providers/NewsProvider.js";
+import { Router } from "./Router.js";
 import {
-  Router,
-  type MarketRouteOptions,
-  type OrderRouteOptions,
-  type NewsRouteOptions,
-} from "./Router.js";
-import { compose, type UniversalAlgorithm } from "./compose.js";
-import { orderHandlerMiddleware } from "./OrderHandler.js";
+  compose,
+  type UniversalAlgo,
+  type MarketAlgo,
+  type OrderAlgo,
+  type NewsAlgo,
+} from "./compose.js";
+import { orderHandler } from "./OrderHandler.js";
 import { Context } from "./Context.js";
 import { defaultLogger, type Logger } from "./Logger.js";
 import { TradingError } from "./TradingError.js";
@@ -30,6 +31,69 @@ import { Snapshot } from "./Snapshot.js";
  * Event handler for agent events.
  */
 export type AgentEventHandler<T = unknown> = (data: T) => void | Promise<void>;
+
+/**
+ * Fluent builder for market event routes.
+ */
+class MarketRouteBuilder {
+  constructor(
+    private readonly router: Router,
+    private readonly filter?: (event: MarketEvent) => boolean
+  ) {}
+
+  /**
+   * Register middleware for this market route.
+   */
+  use(...middleware: MarketAlgo[]): void {
+    if (this.filter) {
+      this.router.market({ strategy: middleware, filter: this.filter });
+    } else {
+      this.router.market({ strategy: middleware });
+    }
+  }
+}
+
+/**
+ * Fluent builder for order event routes.
+ */
+class OrderRouteBuilder {
+  constructor(
+    private readonly router: Router,
+    private readonly filter?: (event: OrderEvent) => boolean
+  ) {}
+
+  /**
+   * Register middleware for this order route.
+   */
+  use(...middleware: OrderAlgo[]): void {
+    if (this.filter) {
+      this.router.order({ strategy: middleware, filter: this.filter });
+    } else {
+      this.router.order({ strategy: middleware });
+    }
+  }
+}
+
+/**
+ * Fluent builder for news event routes.
+ */
+class NewsRouteBuilder {
+  constructor(
+    private readonly router: Router,
+    private readonly filter?: (event: NewsEvent) => boolean
+  ) {}
+
+  /**
+   * Register middleware for this news route.
+   */
+  use(...middleware: NewsAlgo[]): void {
+    if (this.filter) {
+      this.router.news({ strategy: middleware, filter: this.filter });
+    } else {
+      this.router.news({ strategy: middleware });
+    }
+  }
+}
 
 /**
  * Main agent orchestrator implementing a Koa-style event loop.
@@ -46,7 +110,7 @@ export class TradingBot {
   private readonly newsProvider?: NewsProvider | undefined;
 
   private readonly router = new Router();
-  private readonly preRoute: UniversalAlgorithm[] = [];
+  private readonly preRoute: UniversalAlgo[] = [];
   private readonly logger;
   private readonly symbols: string[];
 
@@ -54,9 +118,7 @@ export class TradingBot {
   private snapshot: Snapshot;
   private running = false;
 
-  // Business logic: Event queues prevent race conditions when events arrive faster than processing.
   // Each provider has its own queue to ensure sequential processing per event source.
-  // Events from different sources can process concurrently (market vs order vs news).
   private marketQueue = Promise.resolve();
   private orderQueue = Promise.resolve();
   private newsQueue = Promise.resolve();
@@ -87,7 +149,6 @@ export class TradingBot {
 
   /**
    * Add global middleware applied to all events.
-   * Global middleware runs before route-specific middleware.
    *
    * Business logic: Only universal algorithms (working with any event type) can be
    * added globally. Event-specific algorithms must use route methods (market, order, news).
@@ -95,39 +156,78 @@ export class TradingBot {
    * @param middleware - Universal algorithm functions to add
    * @returns This agent for chaining
    */
-  use(...middleware: UniversalAlgorithm[]): this {
+  use(...middleware: UniversalAlgo[]): this {
     this.preRoute.push(...middleware);
     return this;
   }
 
   /**
-   * Route market events with optional filtering.
+   * Fluent API for market events.
    *
-   * @param options - Route options including strategy and filters
+   * @param filter - Optional filter function
+   * @returns Builder to register market middleware
+   *
+   * @example
+   * bot.on("market").use(macdStrategy, positionPrinter);
+   * bot.on("market", (e) => e.marketData.symbol === "AAPL").use(appleStrategy);
    */
-  market(options: MarketRouteOptions): this {
-    this.router.market(options);
-    return this;
-  }
+  on(
+    eventType: "market",
+    filter?: (event: MarketEvent) => boolean
+  ): MarketRouteBuilder;
 
   /**
-   * Route order events with optional filtering.
+   * Fluent API for order events.
    *
-   * @param options - Route options including strategy and filters
+   * @param filter - Optional filter function
+   * @returns Builder to register order middleware
+   *
+   * @example
+   * bot.on("order").use(orderLogger);
+   * bot.on("order", (e) => e.fill.length > 0).use(fillHandler);
    */
-  order(options: OrderRouteOptions): this {
-    this.router.order(options);
-    return this;
-  }
+  on(
+    eventType: "order",
+    filter?: (event: OrderEvent) => boolean
+  ): OrderRouteBuilder;
 
   /**
-   * Route news events with optional filtering.
+   * Fluent API for news events.
    *
-   * @param options - Route options including strategy and filters
+   * @param filter - Optional filter function
+   * @returns Builder to register news middleware
+   *
+   * @example
+   * bot.on("news").use(newsAnalyzer);
    */
-  news(options: NewsRouteOptions): this {
-    this.router.news(options);
-    return this;
+  on(
+    eventType: "news",
+    filter?: (event: NewsEvent) => boolean
+  ): NewsRouteBuilder;
+
+  on(
+    eventType: "market" | "order" | "news",
+    filter?:
+      | ((event: MarketEvent) => boolean)
+      | ((event: OrderEvent) => boolean)
+      | ((event: NewsEvent) => boolean)
+  ): MarketRouteBuilder | OrderRouteBuilder | NewsRouteBuilder {
+    if (eventType === "market") {
+      return new MarketRouteBuilder(
+        this.router,
+        filter as ((event: MarketEvent) => boolean) | undefined
+      );
+    }
+    if (eventType === "order") {
+      return new OrderRouteBuilder(
+        this.router,
+        filter as ((event: OrderEvent) => boolean) | undefined
+      );
+    }
+    return new NewsRouteBuilder(
+      this.router,
+      filter as ((event: NewsEvent) => boolean) | undefined
+    );
   }
 
   /**
@@ -139,10 +239,9 @@ export class TradingBot {
       throw new Error("TradingBot is already running");
     }
 
-    // Phase 1: Connect to providers
     const connections = [
       this.dataProvider.connect(this.handleMarketEvent.bind(this)),
-      this.tradeProvider.connect(this.handlePositionEvent.bind(this)),
+      this.tradeProvider.connect(this.handleOrderEvent.bind(this)),
     ];
     if (this.newsProvider) {
       connections.push(
@@ -151,7 +250,6 @@ export class TradingBot {
     }
     await Promise.all(connections);
 
-    // Phase 2: Get initial state and configure subscriptions
     this.position = await this.tradeProvider.getPosition();
 
     const subs = [
@@ -163,7 +261,6 @@ export class TradingBot {
     }
     await Promise.all(subs);
 
-    // Phase 3: Begin event emission
     this.running = true;
     this.emit("started", undefined);
 
@@ -172,10 +269,6 @@ export class TradingBot {
       begins.push(this.newsProvider.begin());
     }
     await Promise.all(begins);
-
-    // TODO: Event loop performance optimization
-    // - Add event batching for high-frequency data
-    // - Implement event prioritization (fills before market data)
   }
 
   /**
@@ -189,14 +282,12 @@ export class TradingBot {
 
     this.running = false;
 
-    // Phase 1: Stop event emission
     const ends = [this.dataProvider.end(), this.tradeProvider.end()];
     if (this.newsProvider) {
       ends.push(this.newsProvider.end());
     }
     await Promise.all(ends);
 
-    // Phase 2: Unsubscribe
     const unsubs = [
       this.dataProvider.unsubscribeSymbols(this.symbols),
       this.tradeProvider.unsubscribe(),
@@ -206,7 +297,6 @@ export class TradingBot {
     }
     await Promise.all(unsubs);
 
-    // Phase 3: Disconnect
     const disconnections = [
       this.dataProvider.disconnect(),
       this.tradeProvider.disconnect(),
@@ -227,53 +317,11 @@ export class TradingBot {
   }
 
   /**
-   * Get the current position state.
-   */
-  getPosition(): Position {
-    return this.position;
-  }
-
-  /**
-   * Get the current snapshot.
-   */
-  getSnapshot(): Snapshot {
-    return this.snapshot;
-  }
-
-  /**
-   * Subscribe to agent event (replaces existing handler).
-   *
-   * @param eventType - Event type ('started', 'stopped', 'event_processed', 'error_handled')
-   * @param handler - Event handler function
-   */
-  on<T = unknown>(eventType: string, handler: AgentEventHandler<T>): this {
-    this.eventHandlers.set(eventType, handler as AgentEventHandler);
-    return this;
-  }
-
-  /**
-   * Unsubscribe from agent event.
-   *
-   * @param eventType - Event type
-   */
-  off(eventType: string): this {
-    this.eventHandlers.delete(eventType);
-    return this;
-  }
-
-  /**
-   * Handle a market event from the data provider.
-   * Routes the event to appropriate middleware and executes the chain.
-   *
-   * Business logic: Events are queued to prevent race conditions.
-   * If middleware processes slowly, incoming events wait in queue rather than
-   * running concurrently and corrupting shared state (position, snapshot).
+   * Update snapshot before running main dispatch, queued by marketQueue
    *
    * @param event - Market event to process
    */
   private async handleMarketEvent(event: MarketEvent): Promise<void> {
-    // Business logic: Chain this event's processing to the previous event's completion.
-    // The queue ensures sequential processing: event N+1 waits for event N to finish.
     this.marketQueue = this.marketQueue.then(async () => {
       this.snapshot.updateQuotes(event.marketData, this.position);
       await this.handleEvent(event);
@@ -283,23 +331,19 @@ export class TradingBot {
   }
 
   /**
-   * Handle an order event from the trade provider.
-   * Routes the event to appropriate middleware and executes the chain.
-   *
-   * Business logic: Events are queued to prevent race conditions.
-   * Order events must process sequentially to maintain position consistency.
+   * Update position and snapshot before running main dispatch, queued by orderQueue
    *
    * @param event - Order event to process
    */
-  private async handlePositionEvent(event: OrderEvent): Promise<void> {
-    // Business logic: Queue order events separately from market events.
-    // This allows market and order events to process concurrently while
-    // maintaining sequential order within each event type.
+  private async handleOrderEvent(event: OrderEvent): Promise<void> {
     this.orderQueue = this.orderQueue.then(async () => {
-      const status = event.state?.status;
-      if (status === "FILLED" || status === "PARTIAL") {
-        processFill(this.position, event.effect!.fill);
-        this.snapshot.updatePosition(event.effect!.fill.symbol, this.position);
+      if (event.fill.length > 0) {
+        const symbols: string[] = [];
+        for (const fill of event.fill) {
+          processFill(this.position, fill);
+          symbols.push(fill.symbol);
+        }
+        this.snapshot.updatePosition(symbols, this.position);
       }
       await this.handleEvent(event);
     });
@@ -308,18 +352,11 @@ export class TradingBot {
   }
 
   /**
-   * Handle a news event from the news provider.
-   * Routes the event to appropriate middleware and executes the chain.
-   *
-   * Business logic: Events are queued to prevent race conditions.
-   * News events process sequentially within their own queue.
+   * Run main dispatch, queued by newsQueue
    *
    * @param event - News event to process
    */
   private async handleNewsEvent(event: NewsEvent): Promise<void> {
-    // Business logic: News events have their own queue, independent of market/order queues.
-    // This allows concurrent processing across event types while maintaining
-    // sequential order within each type.
     this.newsQueue = this.newsQueue.then(async () => {
       await this.handleEvent(event);
     });
@@ -328,9 +365,6 @@ export class TradingBot {
   }
 
   /**
-   * Handle an event (from data provider or trade provider).
-   * Routes the event to appropriate middleware and executes the chain.
-   *
    * @param event - Event to process
    */
   private async handleEvent(event: Event): Promise<void> {
@@ -340,7 +374,6 @@ export class TradingBot {
 
     const matchedRoutes = this.router.match(event);
 
-    // Execute each route as an atomic strategy with its own context
     for (const routeAlgorithms of matchedRoutes) {
       try {
         const routeContext = new Context({
@@ -353,57 +386,36 @@ export class TradingBot {
           logger: this.logger,
         });
 
-        // Combine global pre-route middleware with this route's algorithms
-        // Pre-route middleware runs first, then route algorithms
         const middleware = [...this.preRoute, ...routeAlgorithms];
 
         const composedMiddleware = compose(middleware);
         await composedMiddleware(routeContext, async () => {});
 
-        // Process pending actions for this route
-        // Each route's actions are executed independently
-        await orderHandlerMiddleware(routeContext);
+        await orderHandler(routeContext);
       } catch (error) {
-        // Enforce TradingError-only contract
         if (!(error instanceof TradingError)) {
-          // Contract violation: just rethrow, don't cover up user's mistake
           throw error;
         }
 
         this.logger.error(error.toJSON());
 
-        // Execute control flow based on error severity
-        // Use emergencyCancel() for panic button - sync, never throws
+        // Business logic: Execute control flow based on error severity
         switch (error.severity) {
           case "recover":
-            // Log and continue processing next events
-            // Pending is dropped due to end of call chain
             break;
-
           case "cancel":
-            // Fire panic button - synchronous, never throws, best-effort
             this.tradeProvider.emergencyCancel();
             break;
-
           case "halt":
-            // Fire panic button then stop gracefully
             this.tradeProvider.emergencyCancel();
             await this.stop();
             throw error;
-
           case "fatal":
-            // Immediate termination
             await this.stop();
             throw error;
         }
-
-        // Emit event for user-defined error handling
-        // User context is limited - they can't interfere with control flow
-        await this.emit("error_handled", error);
       }
     }
-
-    await this.emit("event_processed", event);
   }
 
   /**

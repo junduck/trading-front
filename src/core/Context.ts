@@ -1,4 +1,10 @@
-import { q, type Position, type Order } from "@junduck/trading-core";
+import {
+  q,
+  buyOrder,
+  sellOrder,
+  type Position,
+  type Order,
+} from "@junduck/trading-core";
 import type { Event } from "../types/Events.js";
 import type { DataProvider } from "../providers/DataProvider.js";
 import type { TradeProvider } from "../providers/TradeProvider.js";
@@ -30,16 +36,6 @@ export type OrderAction =
     };
 
 /**
- * A pending action with tracking information.
- */
-export interface PendingAction {
-  /** The action to be executed */
-  action: OrderAction;
-  /** Unique ID for tracking this pending action */
-  trackingId: string;
-}
-
-/**
  * Context passed through the middleware chain.
  *
  * Mental model (similar to Koa):
@@ -62,88 +58,8 @@ export class Context<E extends Event = Event> {
   /** Current position state (request) */
   readonly position: Position;
 
-  /** Available cash from position */
-  get cash(): number {
-    return this.position.cash;
-  }
-
-  /** Total commission paid */
-  get totalCommission(): number {
-    return this.position.totalCommission;
-  }
-
-  /** Total realised profit and loss */
-  get realisedPnL(): number {
-    return this.position.realisedPnL;
-  }
-
-
-  // Position query helpers (bound from q)
-  /** Get holding quantity (long position) */
-  readonly holdingQty = (symbol: string) => q.qty(this.position, symbol);
-  /** Get holding total cost (long position) */
-  readonly holdingCost = (symbol: string) => q.cost(this.position, symbol);
-  /** Get long position quantity */
-  readonly longQty = (symbol: string) => q.longQty(this.position, symbol);
-  /** Get short position quantity */
-  readonly shortQty = (symbol: string) => q.shortQty(this.position, symbol);
-  /** Get long position total cost */
-  readonly longCost = (symbol: string) => q.longCost(this.position, symbol);
-  /** Get short position total proceeds */
-  readonly shortProceeds = (symbol: string) => q.shortProceeds(this.position, symbol);
-  /** Get long position realised PnL */
-  readonly longPnL = (symbol: string) => q.longPnL(this.position, symbol);
-  /** Get short position realised PnL */
-  readonly shortPnL = (symbol: string) => q.shortPnL(this.position, symbol);
-  /** Check if holding exists (long position) */
-  readonly hasHolding = (symbol: string) => q.hasLong(this.position, symbol);
-  /** Check if short position exists */
-  readonly hasShort = (symbol: string) => q.hasShort(this.position, symbol);
-
   /** Current snapshot with market data and portfolio valuation */
   readonly snapshot: Snapshot;
-
-  /**
-   * Get the current price for a symbol.
-   * @param symbol - Symbol to look up
-   * @returns Price, or 0 if not available
-   */
-  price(symbol: string): number {
-    return this.snapshot.price(symbol);
-  }
-
-  /**
-   * Get the market value for a long position.
-   * @param symbol - Symbol to look up
-   * @returns Market value (quantity × price), or 0 if no position
-   */
-  value(symbol: string): number {
-    return this.snapshot.value(symbol);
-  }
-
-  /**
-   * Get the market liability for a short position.
-   * @param symbol - Symbol to look up
-   * @returns Liability (quantity × price), or 0 if no position
-   */
-  liab(symbol: string): number {
-    return this.snapshot.liab(symbol);
-  }
-
-  /**
-   * Get current portfolio equity (cash + market value - liabilities).
-   */
-  get equity(): number {
-    return this.snapshot.equity;
-  }
-
-  /**
-   * Get all market values as a read-only map.
-   * @returns Map of symbol to market value (for long positions)
-   */
-  get marketValue(): ReadonlyMap<string, number> {
-    return this.snapshot.getValueMap();
-  }
 
   /** Data provider for querying additional market data */
   readonly dataProvider: DataProvider;
@@ -157,9 +73,6 @@ export class Context<E extends Event = Event> {
   /** Logger for middleware to log messages at different levels */
   readonly logger: Logger;
 
-  // TODO: High-performance market data time series cache
-  // Add: symbol -> {time, data}[] for historical data access
-
   /**
    * Event-scoped state for sharing data between middleware within this event.
    * Each event gets a fresh state map - no cross-event races.
@@ -168,6 +81,35 @@ export class Context<E extends Event = Event> {
    * Prefer using `get()` and `set()` methods for type-safe access.
    */
   readonly state: Map<string, unknown> = new Map();
+
+  /**
+   * Pending actions to be executed (response).
+   * Middleware adds actions here via createOrder(), cancelOrder(), etc.
+   * Actions are processed by the order handler at the end of the chain.
+   */
+  private readonly pending: OrderAction[] = [];
+
+  constructor(options: {
+    event: E;
+    position: Position;
+    snapshot: Snapshot;
+    dataProvider: DataProvider;
+    tradeProvider: TradeProvider;
+    newsProvider?: NewsProvider | undefined;
+    logger: Logger;
+  }) {
+    this.event = options.event;
+    this.position = options.position;
+    this.snapshot = options.snapshot;
+    this.dataProvider = options.dataProvider;
+    this.tradeProvider = options.tradeProvider;
+    this.newsProvider = options.newsProvider;
+    this.logger = options.logger;
+  }
+
+  // ================================================================================
+  // State
+  // ================================================================================
 
   /**
    * Get a value from event-scoped state with type safety.
@@ -200,9 +142,11 @@ export class Context<E extends Event = Event> {
     if (symbol === undefined) {
       return value as T | undefined;
     }
-    // Assume value is Map<string, T> for symbol lookup
     if (value instanceof Map) {
       return value.get(symbol) as T | undefined;
+    }
+    if (typeof value === "object" && value !== null) {
+      return (value as Record<string, T>)[symbol];
     }
     return undefined;
   }
@@ -217,47 +161,81 @@ export class Context<E extends Event = Event> {
     this.state.set(key, value);
   }
 
-  /**
-   * Pending actions to be executed (response).
-   * Middleware adds actions here via createOrder(), cancelOrder(), etc.
-   * Actions are processed by the order handler at the end of the chain.
-   */
-  private readonly pendingActions: PendingAction[] = [];
-  private trackingIdCounter = 0;
+  // ================================================================================
+  // Position
+  // ================================================================================
 
-  constructor(options: {
-    event: E;
-    position: Position;
-    snapshot: Snapshot;
-    dataProvider: DataProvider;
-    tradeProvider: TradeProvider;
-    newsProvider?: NewsProvider | undefined;
-    logger: Logger;
-  }) {
-    this.event = options.event;
-    this.position = options.position;
-    this.snapshot = options.snapshot;
-    this.dataProvider = options.dataProvider;
-    this.tradeProvider = options.tradeProvider;
-    this.newsProvider = options.newsProvider;
-    this.logger = options.logger;
+  /** Available cash from position */
+  get cash(): number {
+    return this.position.cash;
+  }
+
+  /** Total commission paid */
+  get totalCommission(): number {
+    return this.position.totalCommission;
+  }
+
+  /** Total realised profit and loss */
+  get realisedPnL(): number {
+    return this.position.realisedPnL;
+  }
+
+  readonly holdingQty = (symbol: string) => q.qty(this.position, symbol);
+  readonly holdingCost = (symbol: string) => q.cost(this.position, symbol);
+  readonly longQty = (symbol: string) => q.longQty(this.position, symbol);
+  readonly shortQty = (symbol: string) => q.shortQty(this.position, symbol);
+  readonly longCost = (symbol: string) => q.longCost(this.position, symbol);
+  readonly shortProceeds = (symbol: string) =>
+    q.shortProceeds(this.position, symbol);
+  readonly longPnL = (symbol: string) => q.longPnL(this.position, symbol);
+  readonly shortPnL = (symbol: string) => q.shortPnL(this.position, symbol);
+  readonly hasHolding = (symbol: string) => q.hasLong(this.position, symbol);
+  readonly hasShort = (symbol: string) => q.hasShort(this.position, symbol);
+
+  // ================================================================================
+  // Valuation
+  // ================================================================================
+
+  /**
+   * Get the current price for a symbol.
+   * @param symbol - Symbol to look up
+   * @returns Price, or 0 if not available
+   */
+  price(symbol: string): number {
+    return this.snapshot.price(symbol);
   }
 
   /**
-   * Create a new order to be processed by the order handler at the end of the middleware chain.
-   * Middleware should use this instead of directly calling tradeProvider.submitOrder().
-   *
+   * Get the market value for long position.
+   * @param symbol - Symbol to look up
+   * @returns Market value (quantity × price), or 0 if no position
+   */
+  value(symbol: string): number {
+    return this.snapshot.value(symbol);
+  }
+
+  /**
+   * Get the market liability for short position.
+   * @param symbol - Symbol to look up
+   * @returns Liability (quantity × price), or 0 if no position
+   */
+  liab(symbol: string): number {
+    return this.snapshot.liab(symbol);
+  }
+
+  /**
+   * Get current position equity (cash + market value - liabilities).
+   */
+  get equity(): number {
+    return this.snapshot.equity;
+  }
+
+  /**
    * @param order - Order to create
    * @param reason - Reason for submitting the order
-   * @returns Tracking ID for checking action status later
    */
-  submitOrder(order: Order, reason: OrderActionReason = "algo"): string {
-    const trackingId = `${Date.now()}-${this.trackingIdCounter++}`;
-    this.pendingActions.push({
-      action: { type: "submit", order, reason },
-      trackingId,
-    });
-    return trackingId;
+  submitOrder(order: Order, reason: OrderActionReason = "algo") {
+    this.pending.push({ type: "submit", order, reason });
   }
 
   /**
@@ -265,31 +243,18 @@ export class Context<E extends Event = Event> {
    *
    * @param orderId - ID of the order to cancel
    * @param reason - Reason for canceling the order
-   * @returns Tracking ID for checking action status later
    */
-  cancelOrder(orderId: string, reason: OrderActionReason = "algo"): string {
-    const trackingId = `${Date.now()}-${this.trackingIdCounter++}`;
-    this.pendingActions.push({
-      action: { type: "cancel", orderId, reason },
-      trackingId,
-    });
-    return trackingId;
+  cancelOrder(orderId: string, reason: OrderActionReason = "algo") {
+    this.pending.push({ type: "cancel", orderId, reason });
   }
 
   /**
    * Cancel all open orders (circuit breaker).
-   * Use this for emergency situations or risk management.
    *
    * @param reason - Reason for canceling all orders
-   * @returns Tracking ID for checking action status later
    */
-  cancelAllOrders(reason: OrderActionReason = "risk"): string {
-    const trackingId = `${Date.now()}-${this.trackingIdCounter++}`;
-    this.pendingActions.push({
-      action: { type: "cancel_all", reason },
-      trackingId,
-    });
-    return trackingId;
+  cancelAllOrders(reason: OrderActionReason = "risk") {
+    this.pending.push({ type: "cancel_all", reason });
   }
 
   /**
@@ -298,19 +263,14 @@ export class Context<E extends Event = Event> {
    * @param orderId - ID of the order to modify
    * @param updates - Order fields to update
    * @param reason - Reason for amending the order
-   * @returns Tracking ID for checking action status later
+   * @returns order id
    */
   amendOrder(
     orderId: string,
     updates: Partial<Order>,
     reason: OrderActionReason = "algo"
-  ): string {
-    const trackingId = `${Date.now()}-${this.trackingIdCounter++}`;
-    this.pendingActions.push({
-      action: { type: "amend", orderId, updates, reason },
-      trackingId,
-    });
-    return trackingId;
+  ) {
+    this.pending.push({ type: "amend", orderId, updates, reason });
   }
 
   /**
@@ -319,8 +279,8 @@ export class Context<E extends Event = Event> {
    * @returns Array of pending actions
    * @internal
    */
-  getPendingActions(): PendingAction[] {
-    return this.pendingActions;
+  getPending(): OrderAction[] {
+    return this.pending;
   }
 
   /**
@@ -329,29 +289,23 @@ export class Context<E extends Event = Event> {
    * @param symbol - Symbol to buy
    * @param quantity - Quantity to buy
    * @param reason - Reason for the order (default: "algo")
-   * @returns Tracking ID for checking action status later
-   *
-   * @example
-   * ```ts
-   * ctx.buyMarket("AAPL", 100);
-   * ```
+   * @returns order id
    */
   buyMarket(
     symbol: string,
-    quantity: number,
+    quant: number,
     reason: OrderActionReason = "algo"
   ): string {
-    const order: Order = {
-      id: this.tradeProvider.genOrderId(),
+    const id = this.tradeProvider.genOrderId();
+    const order = buyOrder({
+      id,
       symbol,
-      side: "BUY",
-      effect: "OPEN_LONG",
-      type: "MARKET",
-      quantity,
+      quant,
       created: this.event.timestamp,
-    };
+    });
+    this.submitOrder(order, reason);
 
-    return this.submitOrder(order, reason);
+    return id;
   }
 
   /**
@@ -360,29 +314,23 @@ export class Context<E extends Event = Event> {
    * @param symbol - Symbol to sell
    * @param quantity - Quantity to sell
    * @param reason - Reason for the order (default: "algo")
-   * @returns Tracking ID for checking action status later
-   *
-   * @example
-   * ```ts
-   * ctx.sellMarket("AAPL", 100);
-   * ```
+   * @returns order id
    */
   sellMarket(
     symbol: string,
-    quantity: number,
+    quant: number,
     reason: OrderActionReason = "algo"
   ): string {
-    const order: Order = {
-      id: this.tradeProvider.genOrderId(),
+    const id = this.tradeProvider.genOrderId();
+    const order = sellOrder({
+      id,
       symbol,
-      side: "SELL",
-      effect: "CLOSE_LONG",
-      type: "MARKET",
-      quantity,
+      quant,
       created: this.event.timestamp,
-    };
+    });
+    this.submitOrder(order, reason);
 
-    return this.submitOrder(order, reason);
+    return id;
   }
 
   /**
@@ -392,31 +340,25 @@ export class Context<E extends Event = Event> {
    * @param quantity - Quantity to buy
    * @param price - Limit price
    * @param reason - Reason for the order (default: "algo")
-   * @returns Tracking ID for checking action status later
-   *
-   * @example
-   * ```ts
-   * ctx.buy("AAPL", 100, 150.00);
-   * ```
+   * @returns order id
    */
   buy(
     symbol: string,
-    quantity: number,
+    quant: number,
     price: number,
     reason: OrderActionReason = "algo"
   ): string {
-    const order: Order = {
-      id: this.tradeProvider.genOrderId(),
+    const id = this.tradeProvider.genOrderId();
+    const order = buyOrder({
+      id,
       symbol,
-      side: "BUY",
-      effect: "OPEN_LONG",
-      type: "LIMIT",
-      quantity,
+      quant,
       price,
       created: this.event.timestamp,
-    };
+    });
+    this.submitOrder(order, reason);
 
-    return this.submitOrder(order, reason);
+    return id;
   }
 
   /**
@@ -426,30 +368,24 @@ export class Context<E extends Event = Event> {
    * @param quantity - Quantity to sell
    * @param price - Limit price
    * @param reason - Reason for the order (default: "algo")
-   * @returns Tracking ID for checking action status later
-   *
-   * @example
-   * ```ts
-   * ctx.sell("AAPL", 100, 155.00);
-   * ```
+   * @returns order id
    */
   sell(
     symbol: string,
-    quantity: number,
+    quant: number,
     price: number,
     reason: OrderActionReason = "algo"
   ): string {
-    const order: Order = {
-      id: this.tradeProvider.genOrderId(),
+    const id = this.tradeProvider.genOrderId();
+    const order = sellOrder({
+      id,
       symbol,
-      side: "SELL",
-      effect: "CLOSE_LONG",
-      type: "LIMIT",
-      quantity,
+      quant,
       price,
       created: this.event.timestamp,
-    };
+    });
+    this.submitOrder(order, reason);
 
-    return this.submitOrder(order, reason);
+    return id;
   }
 }

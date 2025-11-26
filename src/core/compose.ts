@@ -1,6 +1,11 @@
 import type { Context } from "./Context.js";
 import { TradingErrors } from "./TradingError.js";
-import type { Event, MarketEvent, OrderEvent, NewsEvent } from "../types/Events.js";
+import type {
+  Event,
+  MarketEvent,
+  OrderEvent,
+  NewsEvent,
+} from "../types/Events.js";
 
 /**
  * Next function to call the next algorithm in the chain.
@@ -14,38 +19,41 @@ export type Next = () => Promise<void>;
  * @template E - Event type this algorithm is compatible with
  *
  * Event type is enforced at compile-time via generics.
- * Use specific types (MarketAlgorithm, OrderAlgorithm) to restrict event compatibility.
+ * Use specific types (MarketAlgo, OrderAlgo) to restrict event compatibility.
  */
-export type Algorithm<E extends Event = Event> = (ctx: Context<E>, next: Next) => Promise<void>;
+export type Algo<E extends Event = Event> = (
+  ctx: Context<E>,
+  next: Next
+) => Promise<void>;
 
 /**
  * Algorithm that only works with market events.
  * Use this for algorithms that need access to marketData.
  */
-export type MarketAlgorithm = Algorithm<MarketEvent>;
+export type MarketAlgo = Algo<MarketEvent>;
 
 /**
  * Algorithm that only works with order events.
  * Use this for algorithms that need access to order state/execution.
  */
-export type OrderAlgorithm = Algorithm<OrderEvent>;
+export type OrderAlgo = Algo<OrderEvent>;
 
 /**
  * Algorithm that only works with news events.
  * Use this for algorithms that need access to news data.
  */
-export type NewsAlgorithm = Algorithm<NewsEvent>;
+export type NewsAlgo = Algo<NewsEvent>;
 
 /**
  * Universal algorithm that works with any event type.
  * Use this for cross-cutting concerns like logging or metrics.
  */
-export type UniversalAlgorithm = Algorithm<Event>;
+export type UniversalAlgo = Algo<Event>;
 
 /**
  * A stack of algorithms composes a strategy for specific event
  */
-export type Strategy<E extends Event = Event> = Algorithm<E>[];
+export type Strategy<E extends Event = Event> = Algo<E>[];
 
 /**
  * Compose multiple algorithms into a single algorithm function.
@@ -55,11 +63,11 @@ export type Strategy<E extends Event = Event> = Algorithm<E>[];
  * @param strat - Array of algorithm to compose
  * @returns A single composed algorithm function
  */
-export function compose<E extends Event = Event>(strat: Strategy<E>): Algorithm<E> {
+export function compose<E extends Event = Event>(strat: Strategy<E>): Algo<E> {
   // Composition-time validation errors (before event loop starts)
-  // These are programming errors and should fail fast with standard Error
+  // These are programming errors and should not throw TradingError
   if (!Array.isArray(strat)) {
-    throw new Error("Algorithm stack must be an array");
+    throw new Error("Strategy must be an array of algorithms");
   }
 
   for (const fn of strat) {

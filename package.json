@@ -51,7 +51,7 @@
     "vitest": "^4.0.12"
   },
   "dependencies": {
-    "@junduck/trading-core": "^2.2.0",
+    "@junduck/trading-core": "^2.4.3",
     "pino": "^9.14.0"
   }
 }

@@ -4,59 +4,16 @@ import type {
   OrderEvent,
   NewsEvent,
 } from "../types/Events.js";
-import type { OrderStatus } from "@junduck/trading-core";
 import type { Strategy } from "./compose.js";
-
-/**
- * Options for routing market events.
- */
-export interface MarketRouteOptions {
-  /** Strategy to execute (market-specific or universal algorithms) */
-  strategy: Strategy<MarketEvent>;
-  /** Single symbol to filter */
-  symbol?: string;
-  /** Multiple symbols to filter */
-  symbols?: string[];
-  /** Custom filter function */
-  filter?: (event: MarketEvent) => boolean;
-}
-
-/**
- * Options for routing order events.
- */
-export interface OrderRouteOptions {
-  /** Strategy to execute (order-specific or universal algorithms) */
-  strategy: Strategy<OrderEvent>;
-  /** Single status to filter */
-  status?: OrderStatus;
-  /** Multiple statuses to filter */
-  statuses?: OrderStatus[];
-  /** Custom filter function */
-  filter?: (event?: OrderEvent) => boolean;
-}
-
-/**
- * Options for routing news events.
- */
-export interface NewsRouteOptions {
-  /** Strategy to execute (news-specific or universal algorithms) */
-  strategy: Strategy<NewsEvent>;
-  /** Custom filter function */
-  filter?: (event: NewsEvent) => boolean;
-}
 
 /**
  * Route handler with optional filter.
  */
-interface RouteHandler<T extends Event> {
-  filter?: (event: T) => boolean;
+export interface RouteHandler<T extends Event> {
   strategy: Strategy<T>;
+  filter?: (event: T) => boolean;
 }
 
-/**
- * High-performance router using tag dispatch.
- * Routes events to algorithm based on event type, then applies filters.
- */
 export class Router {
   private marketRoutes: RouteHandler<MarketEvent>[] = [];
   private orderRoutes: RouteHandler<OrderEvent>[] = [];
@@ -65,70 +22,27 @@ export class Router {
   /**
    * Route market events with optional filtering.
    *
-   * @param options - Route options including strategy and filters
    */
-  market(options: MarketRouteOptions): this {
-    const routeHandler: RouteHandler<MarketEvent> = {
-      strategy: options.strategy,
-    };
-
-    if (options.filter !== undefined) {
-      routeHandler.filter = options.filter;
-    } else if (options.symbol !== undefined) {
-      const symbol = options.symbol;
-      routeHandler.filter = (event: MarketEvent) =>
-        event.marketData.some((item) => item.symbol === symbol);
-    } else if (options.symbols !== undefined) {
-      const symbols = new Set(options.symbols);
-      routeHandler.filter = (event: MarketEvent) =>
-        event.marketData.some((item) => symbols.has(item.symbol));
-    }
-
-    this.marketRoutes.push(routeHandler);
+  market(handler: RouteHandler<MarketEvent>): this {
+    this.marketRoutes.push(handler);
     return this;
   }
 
   /**
    * Route order events with optional filtering.
    *
-   * @param options - Route options including strategy and filters
    */
-  order(options: OrderRouteOptions): this {
-    const routeHandler: RouteHandler<OrderEvent> = {
-      strategy: options.strategy,
-    };
-
-    if (options.filter !== undefined) {
-      routeHandler.filter = options.filter;
-    } else if (options.status !== undefined) {
-      const status = options.status;
-      routeHandler.filter = (event: OrderEvent) =>
-        event.state?.status === status;
-    } else if (options.statuses !== undefined) {
-      const statuses = new Set(options.statuses);
-      routeHandler.filter = (event: OrderEvent) =>
-        event.state?.status !== undefined && statuses.has(event.state.status);
-    }
-
-    this.orderRoutes.push(routeHandler);
+  order(handler: RouteHandler<OrderEvent>): this {
+    this.orderRoutes.push(handler);
     return this;
   }
 
   /**
    * Route news events with optional filtering.
    *
-   * @param options - Route options including strategy and filters
    */
-  news(options: NewsRouteOptions): this {
-    const routeHandler: RouteHandler<NewsEvent> = {
-      strategy: options.strategy,
-    };
-
-    if (options.filter !== undefined) {
-      routeHandler.filter = options.filter;
-    }
-
-    this.newsRoutes.push(routeHandler);
+  news(handler: RouteHandler<NewsEvent>): this {
+    this.newsRoutes.push(handler);
     return this;
   }
 
@@ -146,12 +60,10 @@ export class Router {
   match(event: Event): Strategy[] {
     const matches: Strategy[] = [];
 
-    // Tag dispatch based on event.type
     switch (event.type) {
       case "market":
         for (const route of this.marketRoutes) {
           if (!route.filter || route.filter(event)) {
-            // Safe: MarketEvent strategies can be treated as universal strategies at runtime
             matches.push(route.strategy as Strategy);
           }
         }
@@ -160,7 +72,6 @@ export class Router {
       case "order":
         for (const route of this.orderRoutes) {
           if (!route.filter || route.filter(event)) {
-            // Safe: OrderEvent strategies can be treated as universal strategies at runtime
             matches.push(route.strategy as Strategy);
           }
         }
@@ -169,7 +80,6 @@ export class Router {
       case "news":
         for (const route of this.newsRoutes) {
           if (!route.filter || route.filter(event)) {
-            // Safe: NewsEvent strategies can be treated as universal strategies at runtime
             matches.push(route.strategy as Strategy);
           }
         }
@@ -177,15 +87,6 @@ export class Router {
     }
 
     return matches;
-  }
-
-  /**
-   * Clear all routes.
-   */
-  clear(): void {
-    this.marketRoutes = [];
-    this.orderRoutes = [];
-    this.newsRoutes = [];
   }
 
   /**

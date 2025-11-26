@@ -8,7 +8,7 @@ import {
 import type { Event } from "../types/Events.js";
 import type { DataProvider } from "../providers/DataProvider.js";
 import type { TradeProvider } from "../providers/TradeProvider.js";
-import type { NewsProvider } from "../providers/NewsProvider.js";
+import type { ExternalProvider } from "../providers/ExternalProvider.js";
 import type { Logger } from "./Logger.js";
 import type { Snapshot } from "./Snapshot.js";
 
@@ -46,7 +46,7 @@ export type OrderAction =
  * At the end of the middleware chain, pendingActions are executed
  * (similar to how Koa handles res.body).
  *
- * @template E - Event type for this context (MarketEvent, OrderEvent, NewsEvent, or Event)
+ * @template E - Event type for this context (MarketEvent, OrderEvent, ExternalEvent, or Event)
  *
  * Event type is enforced at compile-time via generics.
  * Router ensures correct event type for each strategy.
@@ -67,8 +67,8 @@ export class Context<E extends Event = Event> {
   /** Trade provider for account info and order submission */
   readonly tradeProvider: TradeProvider;
 
-  /** News provider for querying news data (optional) */
-  readonly newsProvider?: NewsProvider | undefined;
+  /** External provider for external signals */
+  readonly externalProvider?: ExternalProvider | undefined;
 
   /** Logger for middleware to log messages at different levels */
   readonly logger: Logger;
@@ -95,7 +95,7 @@ export class Context<E extends Event = Event> {
     snapshot: Snapshot;
     dataProvider: DataProvider;
     tradeProvider: TradeProvider;
-    newsProvider?: NewsProvider | undefined;
+    externalProvider?: ExternalProvider | undefined;
     logger: Logger;
   }) {
     this.event = options.event;
@@ -103,7 +103,7 @@ export class Context<E extends Event = Event> {
     this.snapshot = options.snapshot;
     this.dataProvider = options.dataProvider;
     this.tradeProvider = options.tradeProvider;
-    this.newsProvider = options.newsProvider;
+    this.externalProvider = options.externalProvider;
     this.logger = options.logger;
   }
 

@@ -4,13 +4,13 @@ import type {
   Event,
   MarketEvent,
   OrderEvent,
-  NewsEvent,
+  ExternalEvent,
 } from "../types/Events.js";
 
 /**
  * Next function to call the next algorithm in the chain.
  */
-export type Next = () => Promise<void>;
+export type Next = () => void;
 
 /**
  * Algorithm function signature.
@@ -24,7 +24,7 @@ export type Next = () => Promise<void>;
 export type Algo<E extends Event = Event> = (
   ctx: Context<E>,
   next: Next
-) => void | Promise<void>;
+) => void;
 
 /**
  * Algorithm that only works with market events.
@@ -39,10 +39,10 @@ export type MarketAlgo = Algo<MarketEvent>;
 export type OrderAlgo = Algo<OrderEvent>;
 
 /**
- * Algorithm that only works with news events.
- * Use this for algorithms that need access to news data.
+ * Algorithm that only works with external events.
+ * Use this for algorithms that need access to external signal data.
  */
-export type NewsAlgo = Algo<NewsEvent>;
+export type ExternalAlgo = Algo<ExternalEvent>;
 
 /**
  * Universal algorithm that works with any event type.
@@ -76,10 +76,10 @@ export function compose<E extends Event = Event>(strat: Strategy<E>): Algo<E> {
     }
   }
 
-  return async (ctx: Context<E>, next: Next) => {
+  return (ctx: Context<E>, next: Next) => {
     let index = -1;
 
-    const dispatch = async (i: number): Promise<void> => {
+    const dispatch = (i: number): void => {
       if (i <= index) {
         // Runtime error during event handling - use TradingError
         throw TradingErrors.system({
@@ -94,9 +94,9 @@ export function compose<E extends Event = Event>(strat: Strategy<E>): Algo<E> {
       const fn = i < strat.length ? strat[i] : next;
       if (!fn) return;
 
-      await fn(ctx, () => dispatch(i + 1));
+      fn(ctx, () => dispatch(i + 1));
     };
 
-    await dispatch(0);
+    dispatch(0);
   };
 }

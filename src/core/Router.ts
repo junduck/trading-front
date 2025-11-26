@@ -2,7 +2,7 @@ import type {
   Event,
   MarketEvent,
   OrderEvent,
-  NewsEvent,
+  ExternalEvent,
 } from "../types/Events.js";
 import type { Strategy } from "./compose.js";
 
@@ -17,7 +17,7 @@ export interface RouteHandler<T extends Event> {
 export class Router {
   private marketRoutes: RouteHandler<MarketEvent>[] = [];
   private orderRoutes: RouteHandler<OrderEvent>[] = [];
-  private newsRoutes: RouteHandler<NewsEvent>[] = [];
+  private externalRoutes: RouteHandler<ExternalEvent>[] = [];
 
   /**
    * Route market events with optional filtering.
@@ -38,11 +38,11 @@ export class Router {
   }
 
   /**
-   * Route news events with optional filtering.
+   * Route external events with optional filtering.
    *
    */
-  news(handler: RouteHandler<NewsEvent>): this {
-    this.newsRoutes.push(handler);
+  external(handler: RouteHandler<ExternalEvent>): this {
+    this.externalRoutes.push(handler);
     return this;
   }
 
@@ -77,8 +77,8 @@ export class Router {
         }
         break;
 
-      case "news":
-        for (const route of this.newsRoutes) {
+      case "external":
+        for (const route of this.externalRoutes) {
           if (!route.filter || route.filter(event)) {
             matches.push(route.strategy as Strategy);
           }
@@ -96,7 +96,7 @@ export class Router {
     return (
       this.marketRoutes.length +
       this.orderRoutes.length +
-      this.newsRoutes.length
+      this.externalRoutes.length
     );
   }
 }

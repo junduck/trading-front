@@ -1,4 +1,5 @@
-import pino, { type LoggerOptions as PinoOptions } from "pino";
+import pino from "pino";
+import type { LoggerOptions as PinoOptions } from "pino";
 
 export type Logger = pino.Logger;
 export type LogLevel = pino.Level;
@@ -49,17 +50,18 @@ export function createLogger(config: LoggerConfig = {}): Logger {
       error: pino.stdSerializers.err,
     },
     // pino-pretty only works in Node.js, skip in browser
-    ...(pretty && !isBrowser && {
-      transport: {
-        target: "pino-pretty",
-        options: {
-          colorize: true,
-          translateTime: "HH:MM:ss.l",
-          ignore: "pid,hostname",
-          singleLine: false,
+    ...(pretty &&
+      !isBrowser && {
+        transport: {
+          target: "pino-pretty",
+          options: {
+            colorize: true,
+            translateTime: "HH:MM:ss.l",
+            ignore: "pid,hostname",
+            singleLine: false,
+          },
         },
-      },
-    }),
+      }),
     // In browsers, pino uses browser configuration by default
     ...(isBrowser && {
       browser: {

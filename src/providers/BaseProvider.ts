@@ -1,33 +1,22 @@
-import type { NewsEvent } from "../types/Events.js";
-import type { LiveNews } from "../types/News.js";
-
 /**
- * Abstract interface for querying and subscribing to news data.
+ * Abstract interface for base TradingBot provider.
  *
  * Lifecycle: IDLE → CONNECTED → SUBSCRIBED → RUNNING → SUBSCRIBED → CONNECTED → IDLE
  *
  * Phase 1 (connect): Establish resources, register callback
- * Phase 2 (subscribe): Declare what topics/symbols to listen for
+ * Phase 2 (subscribe): Declare what symbols/topics to listen for
  * Phase 3 (begin): START event emission
  * Phase 4 (end): STOP event emission (can resume with begin)
  * Phase 5 (unsubscribe): Remove subscriptions
  * Phase 6 (disconnect): Release resources
  */
-export abstract class NewsProvider {
-  /**
-   * Query news data with provider-specific options.
-   *
-   * @param options - Provider-specific query options (e.g., topics, symbols, date range)
-   * @returns Array of news items matching the query criteria
-   */
-  abstract queryLiveNews(options?: unknown): Promise<LiveNews[]>;
-
+export abstract class BaseProvider<E> {
   /**
    * Phase 1: Establish connection and register event callback.
    *
    * Operations:
-   * - Open WebSocket connections or news feed connections
-   * - Authenticate with news provider
+   * - Establish connections, file handles etc
+   * - Authenticate with data source
    * - Register callback function
    * - NO event emission yet
    *
@@ -38,26 +27,24 @@ export abstract class NewsProvider {
    * - Callback registered but not invoked
    * - Resources allocated but idle
    *
-   * @param callback - Function called for each news event (after begin())
+   * @param callback - Function called for each market event (after begin())
    */
-  abstract connect(
-    callback: (event: NewsEvent) => void | Promise<void>
-  ): Promise<void>;
+  abstract connect(callback: (event: E) => void): Promise<void>;
 
   /**
-   * Phase 2: Subscribe to news events (declarative).
+   * Phase 2: Subscribe to event stream with provider-specific options.
+   *
+   * Examples: subscribe to new alert, account changes, or market data types.
    *
    * Operations:
-   * - Send subscription messages to news provider
-   * - Configure topic/symbol filters
+   * - Configure topic/channel subscriptions
    * - NO event emission yet
    *
-   * State: CONNECTED → SUBSCRIBED
+   * State: CONNECTED → SUBSCRIBED (if first subscription)
    *
-   * Can be called multiple times to add more subscriptions.
    * Must be called after connect().
    *
-   * @param options - Provider-specific subscription options (topics, symbols, etc.)
+   * @param options - Provider-specific subscription options
    */
   abstract subscribe(options?: unknown): Promise<void>;
 
@@ -65,13 +52,16 @@ export abstract class NewsProvider {
    * Phase 3: START event emission (imperative trigger).
    *
    * Operations:
-   * - Begin processing incoming news
+   * - Begin processing incoming messages
+   * - Start data replay (for backtest providers)
    * - Enable event callbacks
-   * - Start monitoring news feed
+   * - Start internal timers (if applicable)
    *
    * State: SUBSCRIBED → RUNNING
    *
-   * After this call, the registered callback will be invoked for news events.
+   * After this call, the registered callback will be invoked for market events.
+   * For backtest providers, may block until all historical data is replayed.
+   * For live providers, runs indefinitely until end() is called.
    *
    * Idempotent: calling begin() when already RUNNING is a no-op.
    * Must be called after connect() and subscribe().
@@ -82,7 +72,9 @@ export abstract class NewsProvider {
    * Phase 4: STOP event emission (imperative stop).
    *
    * Operations:
-   * - Stop processing incoming news
+   * - Stop processing incoming messages
+   * - Stop timers/intervals
+   * - Flush pending events
    * - Keep subscriptions active (can resume later with begin())
    *
    * State: RUNNING → SUBSCRIBED
@@ -95,13 +87,9 @@ export abstract class NewsProvider {
   abstract end(): Promise<void>;
 
   /**
-   * Phase 5: Unsubscribe from news events.
+   * Phase 5: Unsubscribe from event stream with provider-specific options.
    *
-   * Operations:
-   * - Send unsubscribe messages
-   * - Clear topic/symbol filters
-   *
-   * State: SUBSCRIBED → CONNECTED
+   * State: SUBSCRIBED → CONNECTED (if no subscriptions remain)
    *        RUNNING → CONNECTED (implicitly calls end() if needed)
    *
    * @param options - Provider-specific unsubscription options
@@ -114,7 +102,7 @@ export abstract class NewsProvider {
    * Operations:
    * - Implicitly calls end() if RUNNING
    * - Implicitly calls unsubscribe() if SUBSCRIBED
-   * - Close connections to news provider
+   * - Close established connections
    * - Clear callback reference
    *
    * State: any → IDLE

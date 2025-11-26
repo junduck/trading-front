@@ -15,6 +15,7 @@ import {
 import { TradeProvider } from "../providers/TradeProvider.js";
 import type { OrderEvent } from "../types/Events.js";
 import type { MarketAlgo } from "../core/compose.js";
+import type { AmendAction } from "../core/Context.js";
 
 /**
  * Commission structure (broker fees)
@@ -162,6 +163,7 @@ export class BacktestBroker extends TradeProvider {
     const submitted: OrderState[] = [];
     for (const order of orders) {
       if (this.openOrders.get(order.id)) {
+        // dup id: reject order
         submitted.push(rejectOrder(order));
       } else {
         const state = acceptOrder(order);
@@ -174,45 +176,54 @@ export class BacktestBroker extends TradeProvider {
     return submitted.length;
   }
 
-  async amendOrder(orderId: string, updates: Partial<Order>): Promise<boolean> {
-    const state = this.openOrders.get(orderId);
-    if (!state) {
-      return false;
+  async amendOrder(updates: AmendAction[]): Promise<number> {
+    const now = new Date();
+    const updated: OrderState[] = [];
+    for (const update of updates) {
+      const state = this.openOrders.get(update.id);
+      if (!state) {
+        continue;
+      }
+
+      if (update.quantity !== undefined) {
+        const filled = state.filledQuantity;
+        state.quantity = update.quantity;
+        state.remainingQuantity = update.quantity - filled;
+      }
+      if (update.price !== undefined) {
+        state.price = update.price;
+      }
+      if (update.stopPrice !== undefined) {
+        state.stopPrice = update.stopPrice;
+      }
+      state.modified = now;
+
+      if (state.remainingQuantity < 0) {
+        cancelOrder(state);
+        this.openOrders.delete(update.id);
+      }
+
+      updated.push(state);
     }
 
-    if (updates.quantity !== undefined) {
-      const filled = state.filledQuantity;
-      state.quantity = updates.quantity;
-      state.remainingQuantity = updates.quantity - filled;
-    }
-    if (updates.price !== undefined) {
-      state.price = updates.price;
-    }
-    if (updates.stopPrice !== undefined) {
-      state.stopPrice = updates.stopPrice;
-    }
-    state.modified = new Date();
-
-    if (state.remainingQuantity < 0) {
-      cancelOrder(state);
-      this.openOrders.delete(orderId);
-    }
-
-    this.notifyUpdated([state]);
-    return true;
+    this.notifyUpdated(updated);
+    return updated.length;
   }
 
-  async cancelOrder(orderId: string): Promise<boolean> {
-    const state = this.openOrders.get(orderId);
-    if (!state) {
-      return false;
+  async cancelOrder(ids: string[]): Promise<number> {
+    const cancelled: OrderState[] = [];
+    for (const id of ids) {
+      const state = this.openOrders.get(id);
+      if (!state) {
+        continue;
+      }
+      cancelOrder(state);
+      cancelled.push(state);
+      this.openOrders.delete(id);
     }
 
-    cancelOrder(state);
-    this.openOrders.delete(orderId);
-
-    this.notifyUpdated([state]);
-    return true;
+    this.notifyUpdated(cancelled);
+    return cancelled.length;
   }
 
   async cancelAllOrders(): Promise<number> {

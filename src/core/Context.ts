@@ -12,6 +12,8 @@ import type { ExternalProvider } from "../providers/ExternalProvider.js";
 import type { Logger } from "./Logger.js";
 import type { Snapshot } from "./Snapshot.js";
 
+export type AmendAction = Partial<Order> & Pick<Order, "id">;
+
 /**
  * Reason for an order action.
  * - `risk`: Risk management or circuit breaker
@@ -30,8 +32,7 @@ export type OrderAction =
   | { type: "cancel_all"; reason: OrderActionReason }
   | {
       type: "amend";
-      orderId: string;
-      updates: Partial<Order>;
+      update: AmendAction;
       reason: OrderActionReason;
     };
 
@@ -265,12 +266,8 @@ export class Context<E extends Event = Event> {
    * @param reason - Reason for amending the order
    * @returns order id
    */
-  amendOrder(
-    orderId: string,
-    updates: Partial<Order>,
-    reason: OrderActionReason = "algo"
-  ) {
-    this.pending.push({ type: "amend", orderId, updates, reason });
+  amendOrder(update: AmendAction, reason: OrderActionReason = "algo") {
+    this.pending.push({ type: "amend", update, reason });
   }
 
   /**

@@ -1,6 +1,7 @@
 import { BaseProvider } from "./BaseProvider.js";
 import type { OrderEvent } from "../types/Events.js";
 import type { Order, Position } from "@junduck/trading-core/trading";
+import type { AmendAction } from "../core/Context.js";
 
 /**
  * Abstract interface for trade execution and account management.
@@ -60,18 +61,15 @@ export abstract class TradeProvider extends BaseProvider<OrderEvent> {
    * @param updates - Order fields to update
    * @returns True if order was successfully amended
    */
-  abstract amendOrder(
-    orderId: string,
-    updates: Partial<Order>
-  ): Promise<boolean>;
+  abstract amendOrder(updates: AmendAction[]): Promise<number>;
 
   /**
    * Cancel a pending order.
    *
-   * @param orderId - ID of the order to cancel
+   * @param ids - ID of the order to cancel
    * @returns True if order was successfully cancelled
    */
-  abstract cancelOrder(orderId: string): Promise<boolean>;
+  abstract cancelOrder(ids: string[]): Promise<number>;
 
   /**
    * Cancel all open orders.

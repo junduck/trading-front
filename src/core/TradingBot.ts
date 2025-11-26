@@ -381,15 +381,24 @@ export class TradingBot {
       return;
     }
 
-    // Business logic: Execute all pending actions collected by middleware
-    for (const action of pending) {
-      if (action.type === "submit") {
-        await this.tradeProvider.submitOrder(action.order);
-      } else if (action.type === "cancel") {
-        await this.tradeProvider.cancelOrder(action.orderId);
-      } else if (action.type === "amend") {
-        await this.tradeProvider.amendOrder(action.orderId, action.updates);
-      }
+    const submit = pending
+      .filter((action) => action.type == "submit")
+      .map((action) => action.order);
+    const cancel = pending
+      .filter((action) => action.type == "cancel")
+      .map((action) => action.orderId);
+    const amend = pending
+      .filter((action) => action.type == "amend")
+      .map((action) => action.update);
+
+    if (submit.length) {
+      await this.tradeProvider.submitOrder(submit);
+    }
+    if (cancel.length) {
+      await this.tradeProvider.cancelOrder(cancel);
+    }
+    if (amend.length) {
+      await this.tradeProvider.amendOrder(amend);
     }
   }
 }

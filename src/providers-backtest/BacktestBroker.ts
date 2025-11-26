@@ -3,17 +3,18 @@ import type {
   Order,
   OrderState,
   Position,
+  Fill,
 } from "@junduck/trading-core/trading";
 import {
   fillOrder,
-  cancelOrder as coreCancelOrder,
+  cancelOrder,
   acceptOrder,
   processFill,
+  rejectOrder,
 } from "@junduck/trading-core/trading";
 import { TradeProvider } from "../providers/TradeProvider.js";
 import type { OrderEvent } from "../types/Events.js";
-import type { MarketAlgorithm } from "../core/compose.js";
-import { TradingErrors } from "../core/TradingError.js";
+import type { MarketAlgo } from "../core/compose.js";
 
 /**
  * Commission structure (broker fees)
@@ -65,7 +66,7 @@ export interface BacktestConfig {
   initialCash: number;
 
   /** Commission (simple rate or detailed structure) */
-  commission: number | CommissionConfig;
+  commission: CommissionConfig;
 
   /** Slippage model (optional) */
   slippage?: SlippageConfig;
@@ -80,11 +81,11 @@ export interface BacktestConfig {
 export class BacktestBroker extends TradeProvider {
   private config: BacktestConfig;
   private position: Position;
-  private pendingOrders: Map<string, OrderState> = new Map();
+  private openOrders: Map<string, OrderState> = new Map(); // id -> state
   private orderIdCounter = 0;
   private connected = false;
   private running = false;
-  private orderCallback?: (event: OrderEvent) => void | Promise<void>;
+  private callback?: (event: OrderEvent) => void;
 
   constructor(config: BacktestConfig) {
     super();
@@ -95,150 +96,6 @@ export class BacktestBroker extends TradeProvider {
       realisedPnL: 0,
       modified: new Date(),
     };
-  }
-
-  genOrderId(): string {
-    return `backtest_${this.orderIdCounter++}`;
-  }
-
-  /**
-   * Calculate commission for a trade
-   */
-  private calculateCommission(price: number, quantity: number): number {
-    const notional = price * quantity;
-    const commission = this.config.commission;
-
-    // Simple rate format (backward compatible)
-    if (typeof commission === "number") {
-      return notional * commission;
-    }
-
-    // Complex commission structure
-    let totalCommission = 0;
-    if (commission.rate) {
-      totalCommission += notional * commission.rate;
-    }
-    if (commission.perTrade) {
-      totalCommission += commission.perTrade;
-    }
-
-    // Apply min/max constraints
-    if (commission.minimum && totalCommission < commission.minimum) {
-      totalCommission = commission.minimum;
-    }
-    if (commission.maximum && totalCommission > commission.maximum) {
-      totalCommission = commission.maximum;
-    }
-
-    return totalCommission;
-  }
-
-  /**
-   * Calculate maximum fillable quantity based on volume constraints
-   */
-  private calculateFillQuantity(
-    requestedQty: number,
-    barVolume?: number
-  ): number {
-    const volumeConfig = this.config.slippage?.volume;
-    if (!volumeConfig || !barVolume) {
-      return requestedQty;
-    }
-
-    // Calculate max allowed quantity based on volume participation
-    if (volumeConfig.maxParticipation) {
-      const maxQty = barVolume * volumeConfig.maxParticipation;
-
-      if (requestedQty > maxQty) {
-        // Partial fill allowed
-        if (volumeConfig.allowPartialFills) {
-          return maxQty;
-        }
-        // Reject entire order
-        return 0;
-      }
-    }
-
-    return requestedQty;
-  }
-
-  /**
-   * Calculate price slippage adjustment
-   */
-  private calculatePriceSlippage(
-    price: number,
-    fillQuantity: number,
-    side: "BUY" | "SELL",
-    barVolume?: number
-  ): number {
-    const priceConfig = this.config.slippage?.price;
-    if (!priceConfig) return 0;
-
-    let totalSlippage = 0;
-
-    // Fixed slippage (in basis points)
-    if (priceConfig.fixed) {
-      totalSlippage += (priceConfig.fixed / 10000) * price;
-    }
-
-    // Market impact based on volume participation
-    if (priceConfig.marketImpact && barVolume && barVolume > 0) {
-      const volumePct = fillQuantity / barVolume;
-      totalSlippage += volumePct * priceConfig.marketImpact * price;
-    }
-
-    // Apply slippage direction (buy = higher, sell = lower)
-    return side === "BUY" ? totalSlippage : -totalSlippage;
-  }
-
-  /**
-   * Get correct match price for order, null if no match
-   */
-  private getMatchPrice(order: Order, quote: MarketQuote): number | null {
-    switch (order.type) {
-      case "MARKET":
-        return order.side === "BUY"
-          ? quote.ask ?? quote.price
-          : quote.bid ?? quote.price;
-
-      case "LIMIT":
-        if (!order.price) return null;
-        if (order.side === "BUY" && quote.ask && quote.ask <= order.price) {
-          return quote.ask;
-        }
-        if (order.side === "SELL" && quote.bid && quote.bid >= order.price) {
-          return quote.bid;
-        }
-        return null;
-
-      case "STOP":
-        if (!order.stopPrice) return null;
-        if (order.side === "BUY" && quote.price >= order.stopPrice) {
-          return quote.ask ?? quote.price;
-        }
-        if (order.side === "SELL" && quote.price <= order.stopPrice) {
-          return quote.bid ?? quote.price;
-        }
-        return null;
-
-      case "STOP_LIMIT":
-        if (!order.stopPrice || !order.price) return null;
-        const stopTriggered =
-          order.side === "BUY"
-            ? quote.price >= order.stopPrice
-            : quote.price <= order.stopPrice;
-        if (!stopTriggered) return null;
-        if (order.side === "BUY" && quote.ask && quote.ask <= order.price) {
-          return quote.ask;
-        }
-        if (order.side === "SELL" && quote.bid && quote.bid >= order.price) {
-          return quote.bid;
-        }
-        return null;
-
-      default:
-        return null;
-    }
   }
 
   /**
@@ -266,14 +123,11 @@ export class BacktestBroker extends TradeProvider {
    * });
    * ```
    */
-  onMarketData(): MarketAlgorithm {
-    return async (ctx, next) => {
+  onMarketData(): MarketAlgo {
+    return (ctx, next) => {
       // ctx.event is guaranteed to be MarketEvent by type system
-      await this.processPendingOrders(
-        ctx.event.marketData,
-        ctx.event.timestamp
-      );
-      await next();
+      this.processPendingOrders(ctx.event.marketData, ctx.event.timestamp);
+      next();
     };
   }
 
@@ -281,122 +135,127 @@ export class BacktestBroker extends TradeProvider {
   // TradingProvider impl
   // ============================================================================
 
+  genOrderId(): string {
+    return `backtest_${this.orderIdCounter++}`;
+  }
+
   async getPosition(): Promise<Position> {
     return structuredClone(this.position);
   }
 
-  async submitOrder(order: Order): Promise<Order> {
-    const state = acceptOrder(order);
-    this.pendingOrders.set(order.id, state);
+  async getOpenOrders(): Promise<Order[]> {
+    return Array.from(this.openOrders.values());
+  }
 
-    if (this.running && this.orderCallback) {
-      await this.orderCallback({
+  notifyUpdated(states: OrderState[]): void {
+    if (this.running && this.callback) {
+      this.callback({
         type: "order",
         timestamp: new Date(),
-        state,
+        updated: states,
+        fill: [],
       });
     }
-
-    return order;
   }
 
-  async getOrder(orderId: string): Promise<Order> {
-    const order = this.pendingOrders.get(orderId);
-    if (!order) {
-      throw TradingErrors.provider({
-        message: `Order ${orderId} not found`,
-        sourceName: "BacktestBroker",
-        severity: "recover",
-        category: "execution",
-      });
+  async submitOrder(orders: Order[]): Promise<number> {
+    const submitted: OrderState[] = [];
+    for (const order of orders) {
+      if (this.openOrders.get(order.id)) {
+        submitted.push(rejectOrder(order));
+      } else {
+        const state = acceptOrder(order);
+        submitted.push(state);
+        this.openOrders.set(order.id, state);
+      }
     }
-    return order;
+
+    this.notifyUpdated(submitted);
+    return submitted.length;
   }
 
-  async getOpenOrders(): Promise<Order[]> {
-    return Array.from(this.pendingOrders.values());
+  async amendOrder(orderId: string, updates: Partial<Order>): Promise<boolean> {
+    const state = this.openOrders.get(orderId);
+    if (!state) {
+      return false;
+    }
+
+    if (updates.quantity !== undefined) {
+      const filled = state.filledQuantity;
+      state.quantity = updates.quantity;
+      state.remainingQuantity = updates.quantity - filled;
+    }
+    if (updates.price !== undefined) {
+      state.price = updates.price;
+    }
+    if (updates.stopPrice !== undefined) {
+      state.stopPrice = updates.stopPrice;
+    }
+    state.modified = new Date();
+
+    if (state.remainingQuantity < 0) {
+      cancelOrder(state);
+      this.openOrders.delete(orderId);
+    }
+
+    this.notifyUpdated([state]);
+    return true;
   }
 
   async cancelOrder(orderId: string): Promise<boolean> {
-    const order = this.pendingOrders.get(orderId);
-    if (!order) return false;
-
-    coreCancelOrder(order);
-    this.pendingOrders.delete(orderId);
-
-    if (this.running && this.orderCallback) {
-      await this.orderCallback({
-        type: "order",
-        timestamp: new Date(),
-        state: order,
-      });
+    const state = this.openOrders.get(orderId);
+    if (!state) {
+      return false;
     }
 
+    cancelOrder(state);
+    this.openOrders.delete(orderId);
+
+    this.notifyUpdated([state]);
     return true;
   }
 
   async cancelAllOrders(): Promise<number> {
-    const count = this.pendingOrders.size;
-    const orders = Array.from(this.pendingOrders.values());
+    const count = this.openOrders.size;
+    if (count === 0) return 0;
+
+    const orders = Array.from(this.openOrders.values());
+    const cancelled: OrderState[] = [];
 
     for (const order of orders) {
-      await this.cancelOrder(order.id);
+      cancelOrder(order);
+      cancelled.push(order);
     }
+    this.openOrders.clear();
 
+    this.notifyUpdated(cancelled);
     return count;
   }
 
   emergencyCancel(): void {
     // Panic button - fire and forget, never throw
-    if (!this.connected) return;
-    for (const orderState of this.pendingOrders.values()) {
-      coreCancelOrder(orderState);
+    if (!this.connected) {
+      return;
     }
-    this.pendingOrders.clear();
+    for (const state of this.openOrders.values()) {
+      cancelOrder(state);
+    }
+    this.openOrders.clear();
   }
 
-  async amendOrder(orderId: string, updates: Partial<Order>): Promise<Order> {
-    const order = this.pendingOrders.get(orderId);
-    if (!order) {
-      throw TradingErrors.provider({
-        message: `Order ${orderId} not found`,
-        sourceName: "BacktestBroker",
-        severity: "recover",
-        category: "execution",
-      });
-    }
+  // ============================================================================
+  // BaseProvider impl
+  // ============================================================================
 
-    if (updates.quantity !== undefined) {
-      const filled = order.filledQuantity;
-      order.quantity = updates.quantity;
-      order.remainingQuantity = updates.quantity - filled;
-    }
-    if (updates.price !== undefined) order.price = updates.price;
-    if (updates.stopPrice !== undefined) order.stopPrice = updates.stopPrice;
-    order.modified = new Date();
-
-    if (this.running && this.orderCallback) {
-      await this.orderCallback({
-        type: "order",
-        timestamp: new Date(),
-        state: order,
-      });
-    }
-
-    return order;
-  }
-
-  async connect(
-    callback: (event: OrderEvent) => void | Promise<void>
-  ): Promise<void> {
-    this.orderCallback = callback;
+  async connect(callback: (event: OrderEvent) => void): Promise<void> {
+    this.callback = callback;
     this.connected = true;
   }
 
   async disconnect(): Promise<void> {
     await this.end();
     this.connected = false;
-    delete this.orderCallback;
+    delete this.callback;
   }
 
   isConnected(): boolean {
@@ -422,73 +281,201 @@ export class BacktestBroker extends TradeProvider {
   }
 
   // ============================================================================
-  // Brokerage impl
+  // Brokerage logic
   // ============================================================================
 
-  private async processPendingOrders(
-    quotes: MarketQuote[],
-    timestamp: Date
-  ): Promise<void> {
+  private processPendingOrders(quotes: MarketQuote[], timestamp: Date): void {
     const quoteMap = new Map(quotes.map((q) => [q.symbol, q]));
+    const updated: OrderState[] = [];
+    const filled: Fill[] = [];
 
-    for (const [orderId, orderState] of Array.from(
-      this.pendingOrders.entries()
-    )) {
-      const quote = quoteMap.get(orderState.symbol);
+    for (const [id, state] of Array.from(this.openOrders.entries())) {
+      const quote = quoteMap.get(state.symbol);
       if (!quote) continue;
 
       // Determine base fill price from order type
-      const baseFillPrice = this.getMatchPrice(orderState, quote);
-      if (baseFillPrice === null) continue;
+      const fillPrice = this.getMatchPrice(state, quote);
+      if (fillPrice === null) continue;
 
       // Apply volume slippage: calculate fillable quantity
-      const fillableQty = this.calculateFillQuantity(
-        orderState.remainingQuantity,
-        quote.volume
-      );
-      if (fillableQty === 0) continue;
+      const fillQuant = this.calculateFillQuantity(state, quote);
+      if (fillQuant === 0) continue;
 
       // Apply price slippage: adjust fill price
-      const priceSlippage = this.calculatePriceSlippage(
-        baseFillPrice,
-        fillableQty,
-        orderState.side,
+      const slippage = this.calculatePriceSlippage(
+        fillPrice,
+        fillQuant,
+        state.side,
         quote.volume
       );
-      const adjustedFillPrice = baseFillPrice + priceSlippage;
+      const adjFillPrice = fillPrice + slippage;
 
       // Calculate commission
-      const commission = this.calculateCommission(
-        adjustedFillPrice,
-        fillableQty
-      );
+      const commission = this.calculateCommission(adjFillPrice, fillQuant);
 
       // Fill the order
       const fill = fillOrder({
-        state: orderState,
+        state,
         id: `fill_${this.orderIdCounter++}`,
-        price: adjustedFillPrice,
-        quant: fillableQty,
+        price: adjFillPrice,
+        quant: fillQuant,
         commission,
-        create: timestamp,
+        created: timestamp,
       });
 
       // Update position
-      const effect = processFill(this.position, fill, "FIFO");
+      processFill(this.position, fill, "FIFO");
+
+      // Collect updated order and fill
+      updated.push(state);
+      filled.push(fill);
 
       // Remove from pending if fully filled
-      if (orderState.status === "FILLED") {
-        this.pendingOrders.delete(orderId);
-      }
-
-      if (this.running && this.orderCallback) {
-        await this.orderCallback({
-          type: "order",
-          timestamp,
-          state: orderState,
-          effect,
-        });
+      if (state.status === "FILLED") {
+        this.openOrders.delete(id);
       }
     }
+
+    // Emit single event with all updates and fills from this tick
+    if (updated.length > 0 && this.running && this.callback) {
+      this.callback({
+        type: "order",
+        timestamp,
+        updated,
+        fill: filled,
+      });
+    }
+  }
+
+  /**
+   * Get correct match price for order, null if no match
+   */
+  private getMatchPrice(order: Order, quote: MarketQuote): number | null {
+    switch (order.type) {
+      case "MARKET":
+        return order.side === "BUY"
+          ? quote.ask ?? quote.price
+          : quote.bid ?? quote.price;
+
+      case "LIMIT":
+        if (!order.price) return null;
+        if (order.side === "BUY") {
+          const effectiveAsk = quote.ask ?? quote.price;
+          return effectiveAsk <= order.price ? effectiveAsk : null;
+        } else {
+          const effectiveBid = quote.bid ?? quote.price;
+          return effectiveBid >= order.price ? effectiveBid : null;
+        }
+
+      case "STOP":
+        if (!order.stopPrice) return null;
+        if (order.side === "BUY" && quote.price >= order.stopPrice) {
+          return quote.ask ?? quote.price;
+        }
+        if (order.side === "SELL" && quote.price <= order.stopPrice) {
+          return quote.bid ?? quote.price;
+        }
+        return null;
+
+      case "STOP_LIMIT":
+        if (!order.stopPrice || !order.price) return null;
+        const stopTriggered =
+          order.side === "BUY"
+            ? quote.price >= order.stopPrice
+            : quote.price <= order.stopPrice;
+        if (!stopTriggered) return null;
+        if (order.side === "BUY") {
+          const effectiveAsk = quote.ask ?? quote.price;
+          return effectiveAsk <= order.price ? effectiveAsk : null;
+        } else {
+          const effectiveBid = quote.bid ?? quote.price;
+          return effectiveBid >= order.price ? effectiveBid : null;
+        }
+
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Calculate maximum fillable quantity based on volume constraints
+   */
+  private calculateFillQuantity(state: OrderState, quote: MarketQuote): number {
+    const volumeConfig = this.config.slippage?.volume;
+    if (!volumeConfig || !quote.volume) {
+      return state.remainingQuantity;
+    }
+
+    // Calculate max allowed quantity based on volume participation
+    if (volumeConfig.maxParticipation) {
+      const maxQty = quote.volume * volumeConfig.maxParticipation;
+
+      if (state.remainingQuantity > maxQty) {
+        // Partial fill allowed
+        if (volumeConfig.allowPartialFills) {
+          return maxQty;
+        }
+        // Reject entire order
+        return 0;
+      }
+    }
+
+    return state.remainingQuantity;
+  }
+
+  /**
+   * Calculate price slippage adjustment
+   */
+  private calculatePriceSlippage(
+    price: number,
+    quant: number,
+    side: "BUY" | "SELL",
+    barVolume?: number
+  ): number {
+    const priceConfig = this.config.slippage?.price;
+    if (!priceConfig) return 0;
+
+    let totalSlippage = 0;
+
+    // Fixed slippage (in basis points)
+    if (priceConfig.fixed) {
+      totalSlippage += (priceConfig.fixed / 10000) * price;
+    }
+
+    // Market impact based on volume participation
+    if (priceConfig.marketImpact && barVolume && barVolume > 0) {
+      const volumePct = quant / barVolume;
+      totalSlippage += volumePct * priceConfig.marketImpact * price;
+    }
+
+    // Apply slippage direction (buy = higher, sell = lower)
+    return side === "BUY" ? totalSlippage : -totalSlippage;
+  }
+
+  /**
+   * Calculate commission for a trade
+   */
+  private calculateCommission(price: number, quant: number): number {
+    const notional = price * quant;
+    const commission = this.config.commission;
+
+    // Complex commission structure
+    let totalCommission = 0;
+    if (commission.rate) {
+      totalCommission += notional * commission.rate;
+    }
+    if (commission.perTrade) {
+      totalCommission += commission.perTrade;
+    }
+
+    // Apply min/max constraints
+    if (commission.minimum && totalCommission < commission.minimum) {
+      totalCommission = commission.minimum;
+    }
+    if (commission.maximum && totalCommission > commission.maximum) {
+      totalCommission = commission.maximum;
+    }
+
+    return totalCommission;
   }
 }

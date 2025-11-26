@@ -24,7 +24,7 @@ export type Next = () => Promise<void>;
 export type Algo<E extends Event = Event> = (
   ctx: Context<E>,
   next: Next
-) => Promise<void>;
+) => void | Promise<void>;
 
 /**
  * Algorithm that only works with market events.

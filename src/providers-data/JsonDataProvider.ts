@@ -1,4 +1,4 @@
-import type { MarketBar, MarketQuote } from "@junduck/trading-core";
+import type { MarketQuote } from "@junduck/trading-core";
 import { readFile } from "node:fs/promises";
 import { DataProvider } from "../providers/DataProvider.js";
 import type { MarketEvent } from "../types/Events.js";
@@ -44,7 +44,7 @@ export class JsonDataProvider extends DataProvider {
   private extractTimestamp: (record: any) => Date;
   private connected = false;
   private running = false;
-  private callback?: (event: MarketEvent) => void | Promise<void>;
+  private callback?: (event: MarketEvent) => void;
 
   constructor(opts: JsonDataProviderOptions) {
     super();
@@ -59,17 +59,6 @@ export class JsonDataProvider extends DataProvider {
       typeof timestampField === "function"
         ? timestampField
         : useDefaultTimestampExtractor(timestampField);
-  }
-
-  async queryQuote(
-    _symbol: string,
-    _options?: unknown
-  ): Promise<MarketQuote[]> {
-    return [];
-  }
-
-  async queryBar(_symbol: string, _options?: unknown): Promise<MarketBar[]> {
-    return [];
   }
 
   async subscribeSymbols(_symbols: string[]): Promise<void> {
@@ -122,11 +111,7 @@ export class JsonDataProvider extends DataProvider {
           timestamp: currentTimestamp,
           marketData: currentBatch,
         };
-
-        const result = this.callback(event);
-        if (result instanceof Promise) {
-          await result;
-        }
+        this.callback(event);
 
         currentTimestamp = recordTimestamp;
         currentBatch = [];
@@ -141,11 +126,7 @@ export class JsonDataProvider extends DataProvider {
         timestamp: currentTimestamp,
         marketData: currentBatch,
       };
-
-      const result = this.callback(event);
-      if (result instanceof Promise) {
-        await result;
-      }
+      this.callback(event);
     }
   }
 
@@ -154,9 +135,7 @@ export class JsonDataProvider extends DataProvider {
     this.running = false;
   }
 
-  async connect(
-    callback: (event: MarketEvent) => void | Promise<void>
-  ): Promise<void> {
+  async connect(callback: (event: MarketEvent) => void): Promise<void> {
     this.callback = callback;
     this.connected = true;
   }

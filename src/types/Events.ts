@@ -1,15 +1,14 @@
 import type {
-  FillEffect,
   MarketQuote,
   OrderState,
-} from "@junduck/trading-core";
-import type { LiveNews } from "./News.js";
+  Fill,
+} from "@junduck/trading-core/trading";
 
 /**
  * Base event with main tag dispatch type.
  */
 export interface BaseEvent {
-  type: "market" | "news" | "order";
+  type: "market" | "external" | "order";
   timestamp: Date;
 }
 
@@ -21,9 +20,21 @@ export interface MarketEvent extends BaseEvent {
   marketData: MarketQuote[];
 }
 
-export interface NewsEvent extends BaseEvent {
-  type: "news";
-  newsData: LiveNews[];
+/**
+ * External event for any external signal source (news, ML predictions, sentiment, etc.)
+ *
+ * Business logic:
+ * - Generic event type for external signals beyond market/order data
+ * - Provider specifies `source` to identify signal type
+ * - Provider defines `data` structure (middleware casts to expected type)
+ * - Examples: news feeds, ML predictions, sentiment analysis, webhooks
+ */
+export interface ExternalEvent extends BaseEvent {
+  type: "external";
+  /** Source identifier (e.g., "news", "ml-predictor", "sentiment") */
+  source: string;
+  /** Provider-specific data payload */
+  data: unknown;
 }
 
 /**
@@ -31,14 +42,14 @@ export interface NewsEvent extends BaseEvent {
  */
 export interface OrderEvent extends BaseEvent {
   type: "order";
-  state?: OrderState;
-  effect?: FillEffect;
+  updated: OrderState[];
+  fill: Fill[];
 }
 
 /**
  * Union type for all events in the system.
  */
-export type Event = MarketEvent | NewsEvent | OrderEvent;
+export type Event = MarketEvent | ExternalEvent | OrderEvent;
 
 /**
  * Type guard to check if an event is a market event.
@@ -47,8 +58,11 @@ export function isMarketEvent(event: Event): event is MarketEvent {
   return event.type === "market";
 }
 
-export function isNewsEvent(event: Event): event is NewsEvent {
-  return event.type === "news";
+/**
+ * Type guard to check if an event is an external event.
+ */
+export function isExternalEvent(event: Event): event is ExternalEvent {
+  return event.type === "external";
 }
 
 /**

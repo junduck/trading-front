@@ -1,4 +1,3 @@
-import type { MarketBar, MarketQuote } from "@junduck/trading-core";
 import { DataProvider } from "../providers/DataProvider.js";
 import type { MarketEvent } from "../types/Events.js";
 import { SinaHqParser } from "./SinaHqParser.js";
@@ -47,7 +46,7 @@ export class SinaHqProvider extends DataProvider {
   private static readonly DEFAULT_POLL_INTERVAL = 3000;
 
   private connected = false;
-  private callback?: (event: MarketEvent) => void | Promise<void>;
+  private callback?: (event: MarketEvent) => void;
   private subscribedSymbols = new Set<string>();
   private pollTimer: NodeJS.Timeout | null = null;
   private pollInterval = SinaHqProvider.DEFAULT_POLL_INTERVAL;
@@ -57,33 +56,24 @@ export class SinaHqProvider extends DataProvider {
   /**
    * Query current market quote data for a single symbol.
    */
-  async queryQuote(symbol: string, _options?: unknown): Promise<MarketQuote[]> {
-    const quotes = await this.fetchQuotes([symbol]);
+  async queryQuote(symbols: string[]): Promise<SinaHqQuote[]> {
+    const quotes = await this.fetchQuotes(symbols);
     return quotes;
-  }
-
-  /**
-   * Query current market bar data for a single symbol.
-   * Note: Sina HQ doesn't provide bar data directly, this returns empty array.
-   */
-  async queryBar(_symbol: string, _options?: unknown): Promise<MarketBar[]> {
-    return [];
   }
 
   /**
    * Subscribe to real-time market events for specific symbols.
    */
   async subscribeSymbols(symbols: string[]): Promise<void> {
+    for (const symbol of symbols) {
+      this.subscribedSymbols.add(symbol);
+    }
     if (!this.connected) {
       throw TradingErrors.provider({
         message: "Must call connect() before subscribing",
         sourceName: "SinaHqProvider",
         severity: "recover",
       });
-    }
-
-    for (const symbol of symbols) {
-      this.subscribedSymbols.add(symbol);
     }
   }
 
@@ -133,9 +123,7 @@ export class SinaHqProvider extends DataProvider {
   /**
    * Connect to the data source with event callback.
    */
-  async connect(
-    callback: (event: MarketEvent) => void | Promise<void>
-  ): Promise<void> {
+  async connect(callback: (event: MarketEvent) => void): Promise<void> {
     this.callback = callback;
     this.connected = true;
   }
@@ -234,10 +222,7 @@ export class SinaHqProvider extends DataProvider {
           marketData: quotes,
         };
 
-        const result = this.callback(event);
-        if (result instanceof Promise) {
-          await result;
-        }
+        this.callback(event);
       }
     } catch {
       // Ignore errors in polling

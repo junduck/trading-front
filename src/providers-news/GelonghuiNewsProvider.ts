@@ -1,5 +1,6 @@
-import type { NewsEvent } from "../types/Events.js";
-import { NewsProvider } from "../providers/NewsProvider.js";
+import type { ExternalEvent } from "../types/Events.js";
+import { ExternalProvider } from "../providers/ExternalProvider.js";
+import { TradingErrors } from "../core/TradingError.js";
 
 /** Gelonghui API related stock information */
 interface GelonghuiRelatedStock {
@@ -69,13 +70,13 @@ export interface GelonghuiSubscribeOptions {
  * Polls Gelonghui's API for real-time financial news.
  * @platform node
  */
-export class GelonghuiNewsProvider extends NewsProvider {
+export class GelonghuiNewsProvider extends ExternalProvider {
   private static readonly BASE_URL = "https://www.gelonghui.com";
-  private static readonly DEFAULT_POLL_INTERVAL = 30000; // 30 seconds
-  private static readonly DEFAULT_LIMIT = 15;
+  private static readonly DEFAULT_POLL_INTERVAL = 15000; // 15 seconds
+  private static readonly DEFAULT_LIMIT = 30;
 
   private connected = false;
-  private callback?: (event: NewsEvent) => void;
+  private callback?: (event: ExternalEvent) => void;
   private pollTimer: NodeJS.Timeout | null = null;
   private pollInterval = GelonghuiNewsProvider.DEFAULT_POLL_INTERVAL;
   private running = false;
@@ -85,9 +86,7 @@ export class GelonghuiNewsProvider extends NewsProvider {
   /**
    * Query live news with optional pagination.
    */
-  async queryLiveNews(
-    options?: GelonghuiQueryOptions
-  ): Promise<GelonghuiNewsItem[]> {
+  async query(options?: GelonghuiQueryOptions): Promise<GelonghuiNewsItem[]> {
     const limit = options?.limit ?? this.limit;
     return await this.fetchNews(limit, options?.liveId);
   }
@@ -96,15 +95,20 @@ export class GelonghuiNewsProvider extends NewsProvider {
    * Subscribe to live news and configure options.
    */
   async subscribe(options?: GelonghuiSubscribeOptions): Promise<void> {
-    if (!this.connected) {
-      throw new Error("Must call connect() before subscribing");
-    }
-
     if (options?.pollInterval) {
       this.pollInterval = options.pollInterval;
     }
     if (options?.limit) {
       this.limit = options.limit;
+    }
+
+    if (!this.connected) {
+      throw TradingErrors.provider({
+        message: "Must call connect() before subscribing",
+        sourceName: "GelonghuiNewsProvider",
+        severity: "recover",
+        category: "state",
+      });
     }
   }
 
@@ -128,7 +132,7 @@ export class GelonghuiNewsProvider extends NewsProvider {
   /**
    * Connect to news source with event callback.
    */
-  async connect(callback: (event: NewsEvent) => void): Promise<void> {
+  async connect(callback: (event: ExternalEvent) => void): Promise<void> {
     this.callback = callback;
     this.connected = true;
   }
@@ -182,13 +186,21 @@ export class GelonghuiNewsProvider extends NewsProvider {
     });
 
     if (!response.ok) {
-      throw new Error(`Gelonghui API request failed: ${response.status}`);
+      throw TradingErrors.provider({
+        message: `Gelonghui API request failed: ${response.status}`,
+        sourceName: "GelonghuiNewsProvider",
+        severity: "recover",
+      });
     }
 
     const data = (await response.json()) as GelonghuiNewsResponse;
 
     if (data.statusCode !== 200) {
-      throw new Error(`Gelonghui API error: ${data.message}`);
+      throw TradingErrors.provider({
+        message: `Gelonghui API error: ${data.message}`,
+        sourceName: "GelonghuiNewsProvider",
+        severity: "recover",
+      });
     }
 
     return data.result.map((item) => {
@@ -248,10 +260,11 @@ export class GelonghuiNewsProvider extends NewsProvider {
         // Update highestSeenId (first item has highest ID)
         this.highestSeenId = newItems[0]!.id;
 
-        const event: NewsEvent = {
-          type: "news",
+        const event: ExternalEvent = {
+          type: "external",
+          source: "gelonghui-news",
+          data: newItems,
           timestamp: new Date(),
-          newsData: newItems,
         };
 
         this.callback(event);

@@ -55,3 +55,4 @@ plan*.md
 
 # Local test fixtures
 fixtures/
+reference/

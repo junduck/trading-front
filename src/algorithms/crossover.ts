@@ -1,5 +1,4 @@
 import type { MarketAlgo } from "../core/compose.js";
-import type { MacdValue } from "./macd.js";
 
 /** Crossover signal type */
 export type CrossoverSignal = "bullish" | "bearish" | "none";
@@ -21,7 +20,7 @@ export interface CrossoverOptions {
   /** State key to write crossover signals to (default: "crossover") */
   targetKey?: string;
   /** Field to track for crossover (default: "histogram") */
-  field?: keyof MacdValue;
+  field?: string;
   /** Threshold for crossing zero (default: 0) */
   threshold?: number;
 }
@@ -44,30 +43,25 @@ export interface CrossoverOptions {
  * @example
  * ```ts
  * // Detect MACD histogram crossovers
- * agent.market({
- *   strategy: [
- *     macd(),
- *     crossover(),
- *   ]
- * });
+ * bot.on("market").use(
+ *   macd(),
+ *   crossover()
+ * );
  *
  * // Access crossover signals in strategy
- * agent.market({
- *   symbol: "AAPL",
- *   strategy: [
- *     macd(),
- *     crossover(),
- *     (ctx) => {
- *       const signals = ctx.state.get("crossover") as Map<string, CrossoverValue>;
- *       const signal = signals?.get("AAPL");
- *       if (signal?.signal === "bullish") {
- *         // Buy signal
- *       } else if (signal?.signal === "bearish") {
- *         // Sell signal
- *       }
+ * bot.on("market").use(
+ *   macd(),
+ *   crossover(),
+ *   (ctx, next) => {
+ *     const signal = ctx.get<CrossoverValue>("crossover", "AAPL");
+ *     if (signal?.signal === "bullish") {
+ *       // Buy signal
+ *     } else if (signal?.signal === "bearish") {
+ *       // Sell signal
  *     }
- *   ]
- * });
+ *     next();
+ *   }
+ * );
  * ```
  */
 export function crossover(options: CrossoverOptions = {}): MarketAlgo {
@@ -85,7 +79,7 @@ export function crossover(options: CrossoverOptions = {}): MarketAlgo {
   return (ctx, next) => {
     // Business logic: Crossover detection requires indicator values from market events.
     // ctx.event is guaranteed to be MarketEvent by type system.
-    const sourceData = ctx.get<Map<string, MacdValue>>(sourceKey);
+    const sourceData = ctx.get<Map<string, Record<string, number>>>(sourceKey);
 
     if (!sourceData) {
       // No source data available, skip crossover detection

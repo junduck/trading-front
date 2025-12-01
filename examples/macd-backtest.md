@@ -7,7 +7,7 @@ This example demonstrates the composable middleware pattern in `trading-front`, 
 ```text
 Market Event
     ↓
-[1] BacktestProvider.onMarketData()
+[1] BacktestBroker.onMarketData()
     → Matches pending orders with market prices
     → Executes fills
     ↓

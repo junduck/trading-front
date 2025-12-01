@@ -29,7 +29,7 @@ export abstract class BaseProvider<E> {
    *
    * @param callback - Function called for each market event (after begin())
    */
-  abstract connect(callback: (event: E) => void): Promise<void>;
+  abstract connect(callback: (event: E) => Promise<void>): Promise<void>;
 
   /**
    * Phase 2: Subscribe to event stream with provider-specific options.

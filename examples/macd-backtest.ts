@@ -13,36 +13,35 @@
  * - Uses 5-minute OHLCV data from JSON file
  */
 
+import { macd } from "./algorithms/macd.js";
 import {
   TradingBot,
-  macd,
   crossover,
   maxQty,
   type CrossoverValue,
 } from "../src/index.js";
-import { BacktestProvider } from "../src/providers-backtest/BacktestProvider.js";
+import { BacktestBroker } from "../src/providers-backtest/BacktestBroker.js";
 import {
   JsonDataProvider,
   useUnixEpochExtractor,
 } from "../src/providers-data/JsonDataProvider.js";
-import type { MarketEvent, OrderEvent } from "../src/types/Events.js";
-import { appraisePosition, q } from "@junduck/trading-core";
+import { q } from "@junduck/trading-core";
 
 async function main() {
   console.log("🚀 MACD Trading Strategy Backtest\n");
 
   // Create data provider loading from JSON file
   const dataProvider = new JsonDataProvider({
-    filePath: "./fixtures/ohlcv-5m-000001.json",
+    filePath: "fixtures/ohlcv-5m-000001.json",
     mapping: {
       timestampField: useUnixEpochExtractor("timestamp", "s"),
     },
   });
 
   // Create backtest provider with initial capital
-  const tradeProvider = new BacktestProvider({
+  const tradeProvider = new BacktestBroker({
     initialCash: 100000,
-    commissionRate: 0.0003, // 0.03% commission
+    commission: { rate: 0.0003 }, // 0.03% commission
   });
 
   // Create trading bot
@@ -52,114 +51,83 @@ async function main() {
     symbols: ["000001"],
   });
 
-  // Composable middleware pipeline:
-  // 1. BacktestProvider processes orders on market data
-  bot.use(tradeProvider.onMarketData());
-
-  // 2. MACD calculates indicator values -> state.macd
-  bot.use(macd());
-
-  // 3. Crossover detects signals -> state.crossover
-  bot.use(crossover());
-
   let eventCount = 0;
   let tradeCount = 0;
 
-  // Trading strategy: Read state.crossover and execute trades
-  bot.market({
-    symbol: "000001",
-    strategy: [
-      async (ctx) => {
-        const event = ctx.event as MarketEvent;
+  // Composable middleware pipeline:
+  bot
+    .on("market")
+    .use(tradeProvider.onMarketData(), macd(), crossover(), (ctx) => {
+      const event = ctx.event;
 
-        // Read crossover signal from state (written by crossover middleware)
-        const signal = ctx.get<CrossoverValue>("crossover", "000001");
-        if (!signal) return;
+      // Read crossover signal from state (written by crossover middleware)
+      const signal = ctx.get<CrossoverValue>("crossover", "000001");
+      if (!signal) return;
 
-        eventCount++;
-        const price = ctx.price("000001");
-        if (!price) return;
+      eventCount++;
+      const price = ctx.price("000001");
+      if (!price) return;
 
-        // Print crossover signals for first few events and periodically
-        if (eventCount <= 5 || eventCount % 500 === 0) {
-          console.log(
-            `[${eventCount}] ${event.timestamp.toISOString()} Price: ¥${price.toFixed(
-              2
-            )}, Signal: ${signal.signal}, Hist: ${signal.current.toFixed(4)}`
-          );
-        }
+      // Print crossover signals for first few events and periodically
+      if (eventCount <= 5 || eventCount % 500 === 0) {
+        console.log(
+          `[${eventCount}] ${event.timestamp.toISOString()} Price: ¥${price.toFixed(
+            2
+          )}, Signal: ${signal.signal}, Hist: ${signal.current.toFixed(4)}`
+        );
+      }
 
-        // Execute on bullish crossover: buy with all cash
-        const currentPosition = ctx.holdingQty("000001");
+      // Execute on bullish crossover: buy with all cash
+      const currentPosition = ctx.holdingQty("000001");
 
-        if (signal.signal === "bullish" && currentPosition === 0) {
-          const quantity = maxQty(ctx.position, price);
+      if (signal.signal === "bullish" && currentPosition === 0) {
+        const quantity = maxQty(ctx.position, price);
 
-          if (quantity > 0) {
-            tradeCount++;
-            const cost = quantity * price;
-            console.log(
-              `[${event.timestamp.toISOString()}] 🟢 BUY SIGNAL (crossover: bullish, hist: ${signal.current.toFixed(
-                4
-              )})`
-            );
-            console.log(
-              `   Buying ${quantity} shares @ ¥${price.toFixed(
-                2
-              )} = ¥${cost.toFixed(2)}`
-            );
-
-            ctx.buyMarket("000001", quantity);
-          }
-        }
-
-        // Execute on bearish crossover: sell all holdings
-        if (signal.signal === "bearish" && currentPosition > 0) {
+        if (quantity > 0) {
           tradeCount++;
-          const proceeds = currentPosition * price;
+          const cost = quantity * price;
           console.log(
-            `[${event.timestamp.toISOString()}] 🔴 SELL SIGNAL (crossover: bearish, hist: ${signal.current.toFixed(
+            `[${event.timestamp.toISOString()}] 🟢 BUY SIGNAL (crossover: bullish, hist: ${signal.current.toFixed(
               4
             )})`
           );
           console.log(
-            `   Selling ${currentPosition} shares @ ¥${price.toFixed(
+            `   Buying ${quantity} shares @ ¥${price.toFixed(
               2
-            )} = ¥${proceeds.toFixed(2)}`
+            )} = ¥${cost.toFixed(2)}`
           );
 
-          ctx.sellMarket("000001", currentPosition);
+          ctx.buyMarket("000001", quantity);
         }
-      },
-    ],
-  });
+      }
+
+      // Execute on bearish crossover: sell all holdings
+      if (signal.signal === "bearish" && currentPosition > 0) {
+        tradeCount++;
+        const proceeds = currentPosition * price;
+        console.log(
+          `[${event.timestamp.toISOString()}] 🔴 SELL SIGNAL (crossover: bearish, hist: ${signal.current.toFixed(
+            4
+          )})`
+        );
+        console.log(
+          `   Selling ${currentPosition} shares @ ¥${price.toFixed(
+            2
+          )} = ¥${proceeds.toFixed(2)}`
+        );
+
+        ctx.sellMarket("000001", currentPosition);
+      }
+    });
 
   // Log filled orders
-  bot.order({
-    status: "FILLED",
-    strategy: [
-      async (ctx) => {
-        const event = ctx.event as OrderEvent;
-        const state = event.state;
+  bot.on("order").use((ctx) => {
+    const event = ctx.event;
 
-        if (!state || state.symbol !== "000001") return;
+    // Check if any updated order is for our symbol
+    if (!event.updated.some((state) => state.symbol === "000001")) return;
 
-        console.log(`   ✓ Position: ${ctx.holdingQty("000001")} shares`);
-      },
-    ],
-  });
-
-  // Event listeners
-  bot.on("started", () => {
-    console.log("✅ Trading bot started\n");
-  });
-
-  bot.on("stopped", () => {
-    console.log("\n🛑 Trading bot stopped");
-  });
-
-  bot.on("error", (error: any) => {
-    console.error("\n❌ Error:", error);
+    console.log(`   ✓ Position: ${ctx.holdingQty("000001")} shares`);
   });
 
   // Show initial configuration
@@ -173,12 +141,12 @@ async function main() {
   await bot.start();
 
   // Note: Orders submitted on the last bar cannot be matched
-  // because BacktestProvider matches orders when the next bar arrives
+  // because BacktestBroker matches orders when the next bar arrives
 
   // Print final results
   const finalPosition = bot.getPosition();
   const finalSnapshot = bot.getSnapshot();
-  const totalEquity = appraisePosition(finalPosition, finalSnapshot);
+  const totalEquity = finalSnapshot.equity;
   const totalReturn = ((totalEquity - 100000) / 100000) * 100;
   const finalHolding = q.qty(finalPosition, "000001");
 
@@ -188,10 +156,12 @@ async function main() {
   console.log(`   Cash: ¥${finalPosition.cash.toFixed(2)}`);
   console.log(`   Position: ${finalHolding} shares`);
   if (finalHolding > 0) {
-    const finalPrice = finalSnapshot.price.get("000001") ?? 0;
+    const finalPrice = finalSnapshot.price("000001");
     const unrealizedValue = finalHolding * finalPrice;
     console.log(
-      `   Unrealized Value: ¥${unrealizedValue.toFixed(2)} (@ ¥${finalPrice.toFixed(2)})`
+      `   Unrealized Value: ¥${unrealizedValue.toFixed(
+        2
+      )} (@ ¥${finalPrice.toFixed(2)})`
     );
   }
   console.log(

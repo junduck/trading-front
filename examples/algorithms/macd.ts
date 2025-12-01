@@ -1,5 +1,5 @@
 import { EMA } from "@junduck/trading-core/algorithm";
-import type { MarketAlgo } from "../core/compose.js";
+import type { MarketAlgo } from "../../src/core/compose.js";
 
 /** MACD values for a symbol */
 export interface MacdValue {
@@ -48,28 +48,28 @@ export interface MacdOptions {
  * @example
  * ```ts
  * // Use default periods (12, 26, 9)
- * agent.market({ strategy: [macd()] });
+ * bot.on("market").use(macd());
  *
  * // Custom periods
- * agent.market({ strategy: [macd({ fastPeriod: 8, slowPeriod: 21, signalPeriod: 5 })] });
+ * bot.on("market").use(
+ *   macd({ fastPeriod: 8, slowPeriod: 21, signalPeriod: 5 })
+ * );
  *
  * // Access MACD values in strategy
- * agent.market({
- *   symbol: "AAPL",
- *   strategy: [
- *     macd(),
- *     async (ctx) => {
- *       const macdValues = ctx.state.get("macd") as Map<string, MacdValue>;
- *       const aapl = macdValues?.get("AAPL");
- *       if (aapl) {
- *         // Bullish crossover: histogram crosses above zero
- *         if (aapl.histogram > 0) {
- *           // Buy signal
- *         }
+ * bot.on("market").use(
+ *   macd(),
+ *   (ctx, next) => {
+ *     const macdValues = ctx.get<Map<string, MacdValue>>("macd");
+ *     const aapl = macdValues?.get("AAPL");
+ *     if (aapl) {
+ *       // Bullish crossover: histogram crosses above zero
+ *       if (aapl.histogram > 0) {
+ *         // Buy signal
  *       }
  *     }
- *   ]
- * });
+ *     next();
+ *   }
+ * );
  * ```
  */
 export function macd(options: MacdOptions = {}): MarketAlgo {

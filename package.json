@@ -51,7 +51,10 @@
     "vitest": "^4.0.12"
   },
   "dependencies": {
-    "@junduck/trading-core": "^2.4.3",
-    "pino": "^9.14.0"
+    "@junduck/trading-core": "^2.7.0",
+    "@junduck/trading-indi": "^0.998.2",
+    "ai": "^5.0.104",
+    "pino": "^9.14.0",
+    "zod": "^4.1.13"
   }
 }

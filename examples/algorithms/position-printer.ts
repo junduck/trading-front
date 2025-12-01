@@ -1,4 +1,4 @@
-import type { UniversalAlgo } from "../core/compose.js";
+import type { UniversalAlgo } from "../../src/core/compose.js";
 
 /** Options for position printer */
 export interface PositionPrinterOptions {
@@ -29,10 +29,10 @@ export interface PositionPrinterOptions {
  * @example
  * ```ts
  * // Print all position updates
- * agent.use(positionPrinter());
+ * bot.use(positionPrinter());
  *
  * // Only print long positions and cash
- * agent.use(positionPrinter({ printShort: false, printSummary: false }));
+ * bot.use(positionPrinter({ printShort: false, printSummary: false }));
  * ```
  */
 export function positionPrinter(

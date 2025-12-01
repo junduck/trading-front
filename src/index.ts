@@ -2,13 +2,14 @@
 export { TradingBot } from "./core/TradingBot.js";
 export { Context } from "./core/Context.js";
 export { Router } from "./core/Router.js";
+export { Snapshot } from "./core/Snapshot.js";
 export {
   compose,
-  type Algorithm,
-  type MarketAlgorithm,
-  type OrderAlgorithm,
-  type NewsAlgorithm,
-  type UniversalAlgorithm,
+  type Algo as Algorithm,
+  type MarketAlgo as MarketAlgo,
+  type OrderAlgo,
+  type ExternalAlgo,
+  type UniversalAlgo,
   type Strategy,
 } from "./core/compose.js";
 
@@ -30,38 +31,41 @@ export {
 
 // Providers
 export { DataProvider } from "./providers/DataProvider.js";
+export { DataProviderSync } from "./providers/DataProviderSync.js";
 export { TradeProvider } from "./providers/TradeProvider.js";
-export { NewsProvider } from "./providers/NewsProvider.js";
+export { TradeProviderSync } from "./providers/TradeProviderSync.js";
+export { ExternalProvider } from "./providers/ExternalProvider.js";
+export { ExternalProviderSync } from "./providers/ExternalProviderSync.js";
 
 // Algorithms
 export {
-  macd,
-  type MacdOptions,
-  type MacdValue,
   crossover,
   type CrossoverOptions,
   type CrossoverValue,
   type CrossoverSignal,
-  positionPrinter,
-  type PositionPrinterOptions,
-  eventCounter,
-  type EventCounterOptions,
   history,
   type HistoryOptions,
 } from "./algorithms/index.js";
 
 // Backtest
+export { BacktestBroker } from "./providers-backtest/BacktestBroker.js";
+
 export {
-  BacktestProvider,
   type BacktestConfig,
-} from "./providers-backtest/BacktestProvider.js";
+  type CommissionConfig,
+  type SlippageConfig,
+} from "./schema/backtest.js";
 
 // Utilities
+export { maxQty, qtyForValue, type OrderSizingOptions } from "./utils/index.js";
+
+// Metrics
 export {
-  maxQty,
-  qtyForValue,
-  type OrderSizingOptions,
-} from "./utils/index.js";
+  PerformanceMetrics,
+  performanceTracker,
+  type PerformanceConfig,
+  type PerformanceSnapshot,
+} from "./metrics/index.js";
 
 // Types
 export type {
@@ -69,7 +73,10 @@ export type {
   BaseEvent,
   MarketEvent,
   OrderEvent,
-  NewsEvent,
+  ExternalEvent,
 } from "./types/Events.js";
-export { isMarketEvent, isOrderEvent, isNewsEvent } from "./types/Events.js";
-export type { LiveNews } from "./types/News.js";
+export {
+  isMarketEvent,
+  isOrderEvent,
+  isExternalEvent,
+} from "./types/Events.js";

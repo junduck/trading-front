@@ -26,22 +26,20 @@ export type QuoteBuffer = CircularBuffer<MarketQuote>;
  * @example
  * ```ts
  * // Store last 100 market data points per symbol
- * agent.market({ strategy: [history({ maxLength: 100 })] });
+ * bot.on("market").use(history({ maxLength: 100 }));
  *
  * // Access history in strategy
- * agent.market({
- *   symbol: "AAPL",
- *   strategy: [
- *     history({ maxLength: 100 }),
- *     async (ctx) => {
- *       const aaplHistory = ctx.get<QuoteBuffer>("history", "APPL");
- *       if (aaplHistory && aaplHistory.length() >= 20) {
- *         const recentPrices = aaplHistory.toArray().slice(-20);
- *         // Analyze recent price movements
- *       }
+ * bot.on("market").use(
+ *   history({ maxLength: 100 }),
+ *   (ctx, next) => {
+ *     const aaplHistory = ctx.get<QuoteBuffer>("history", "AAPL");
+ *     if (aaplHistory && aaplHistory.length() >= 20) {
+ *       const recentPrices = aaplHistory.toArray().slice(-20);
+ *       // Analyze recent price movements
  *     }
- *   ]
- * });
+ *     next();
+ *   }
+ * );
  * ```
  */
 export function history(options: HistoryOptions): MarketAlgo {

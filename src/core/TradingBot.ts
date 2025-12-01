@@ -1,9 +1,4 @@
-import {
-  type Position,
-  type MarketQuote,
-  processFill,
-  createPosition,
-} from "@junduck/trading-core/trading";
+import { type MarketQuote, processFill } from "@junduck/trading-core/trading";
 import type {
   Event,
   MarketEvent,
@@ -13,89 +8,21 @@ import type {
 import type { DataProvider } from "../providers/DataProvider.js";
 import type { TradeProvider } from "../providers/TradeProvider.js";
 import type { ExternalProvider } from "../providers/ExternalProvider.js";
-import { Router } from "./Router.js";
-import {
-  compose,
-  type UniversalAlgo,
-  type MarketAlgo,
-  type OrderAlgo,
-  type ExternalAlgo,
-} from "./compose.js";
-import { Context } from "./Context.js";
-import { defaultLogger, type Logger } from "./Logger.js";
+import { compose, composeWithPre } from "./compose.js";
+import { Context, type OrderAction, type ProviderContext } from "./Context.js";
+import { type Logger } from "./Logger.js";
 import { TradingError } from "./TradingError.js";
-import { Snapshot } from "./Snapshot.js";
-
-/** Fluent builder for market event routes. */
-class MarketRouteBuilder {
-  constructor(
-    private readonly router: Router,
-    private readonly filter?: (event: MarketEvent) => boolean
-  ) {}
-
-  /** Register middleware for this market route. */
-  use(...middleware: MarketAlgo[]): void {
-    if (this.filter) {
-      this.router.market({ strategy: middleware, filter: this.filter });
-    } else {
-      this.router.market({ strategy: middleware });
-    }
-  }
-}
-
-/** Fluent builder for order event routes. */
-class OrderRouteBuilder {
-  constructor(
-    private readonly router: Router,
-    private readonly filter?: (event: OrderEvent) => boolean
-  ) {}
-
-  /** Register middleware for this order route. */
-  use(...middleware: OrderAlgo[]): void {
-    if (this.filter) {
-      this.router.order({ strategy: middleware, filter: this.filter });
-    } else {
-      this.router.order({ strategy: middleware });
-    }
-  }
-}
-
-/** Fluent builder for external event routes. */
-class ExternalRouteBuilder {
-  constructor(
-    private readonly router: Router,
-    private readonly filter?: (event: ExternalEvent) => boolean
-  ) {}
-
-  /** Register middleware for this external route. */
-  use(...middleware: ExternalAlgo[]): void {
-    if (this.filter) {
-      this.router.external({ strategy: middleware, filter: this.filter });
-    } else {
-      this.router.external({ strategy: middleware });
-    }
-  }
-}
+import { EventOrchestrator, groupOrders } from "./TradingBotCommon.js";
 
 /**
- * Main orchestrator implementing middleware-based event processing.
- *
+ * Trading bot with async providers and async pre-hook support.
  * Middleware receives {position, snapshot} and collects pendingActions.
  * After middleware chain completes, pendingActions are executed.
  */
-export class TradingBot {
-  private readonly dataProvider: DataProvider;
-  private readonly tradeProvider: TradeProvider;
-  private readonly externalProviders: ExternalProvider[];
+export class TradingBot extends EventOrchestrator {
+  private readonly providers: ProviderContext & { type: "async" };
 
-  private readonly router = new Router();
-  private readonly preRoute: UniversalAlgo[] = [];
-  private readonly logger;
-  private readonly symbols: string[];
-
-  private position: Position;
-  private snapshot: Snapshot;
-  private running = false;
+  private queue = Promise.resolve();
 
   constructor(opts: {
     dataProvider: DataProvider;
@@ -105,90 +32,18 @@ export class TradingBot {
     initialQuotes?: MarketQuote[];
     logger?: Logger;
   }) {
-    this.dataProvider = opts.dataProvider;
-    this.tradeProvider = opts.tradeProvider;
-    this.externalProviders = opts.externalProviders ?? [];
-    this.symbols = opts.symbols ?? [];
-    this.logger = opts.logger ?? defaultLogger;
+    super(opts);
 
-    this.position = createPosition();
-    this.snapshot = new Snapshot();
+    this.providers = {
+      type: "async",
+      data: opts.dataProvider,
+      trade: opts.tradeProvider,
+      external: opts.externalProviders ?? [],
+    };
+
     if (opts.initialQuotes) {
       this.snapshot.updateQuotes(opts.initialQuotes, this.position);
     }
-  }
-
-  /** Get current position (readonly clone) */
-  getPosition(): Position {
-    return structuredClone(this.position);
-  }
-
-  /** Get current snapshot */
-  getSnapshot(): Snapshot {
-    return this.snapshot;
-  }
-
-  /**
-   * Add global middleware applied to all events.
-   *
-   * Business logic: Only universal algorithms can be added globally.
-   * Event-specific algorithms must use route methods (on).
-   */
-  use(...middleware: UniversalAlgo[]): this {
-    this.preRoute.push(...middleware);
-    return this;
-  }
-
-  /**
-   * Register middleware for market events.
-   * @example bot.on("market").use(macdStrategy);
-   */
-  on(
-    eventType: "market",
-    filter?: (event: MarketEvent) => boolean
-  ): MarketRouteBuilder;
-
-  /**
-   * Register middleware for order events.
-   * @example bot.on("order").use(orderLogger);
-   */
-  on(
-    eventType: "order",
-    filter?: (event: OrderEvent) => boolean
-  ): OrderRouteBuilder;
-
-  /**
-   * Register middleware for external events.
-   * @example bot.on("external").use(newsAnalyzer);
-   */
-  on(
-    eventType: "external",
-    filter?: (event: ExternalEvent) => boolean
-  ): ExternalRouteBuilder;
-
-  on(
-    eventType: "market" | "order" | "external",
-    filter?:
-      | ((event: MarketEvent) => boolean)
-      | ((event: OrderEvent) => boolean)
-      | ((event: ExternalEvent) => boolean)
-  ): MarketRouteBuilder | OrderRouteBuilder | ExternalRouteBuilder {
-    if (eventType === "market") {
-      return new MarketRouteBuilder(
-        this.router,
-        filter as ((event: MarketEvent) => boolean) | undefined
-      );
-    }
-    if (eventType === "order") {
-      return new OrderRouteBuilder(
-        this.router,
-        filter as ((event: OrderEvent) => boolean) | undefined
-      );
-    }
-    return new ExternalRouteBuilder(
-      this.router,
-      filter as ((event: ExternalEvent) => boolean) | undefined
-    );
   }
 
   /** Start event loop: connect, subscribe, begin processing. */
@@ -198,29 +53,29 @@ export class TradingBot {
     }
 
     const connections = [
-      this.dataProvider.connect(this.onMarketEvent.bind(this)),
-      this.tradeProvider.connect(this.onOrderEvent.bind(this)),
-      ...this.externalProviders.map((provider) =>
+      this.providers.trade.connect(this.onOrderEvent.bind(this)),
+      this.providers.data.connect(this.onMarketEvent.bind(this)),
+      ...this.providers.external.map((provider) =>
         provider.connect(this.onExternalEvent.bind(this))
       ),
     ];
     await Promise.all(connections);
 
-    this.position = await this.tradeProvider.getPosition();
+    this.position = await this.providers.trade.getPosition();
 
     const subs = [
-      this.tradeProvider.subscribe(),
-      this.dataProvider.subscribeSymbols(this.symbols),
-      ...this.externalProviders.map((provider) => provider.subscribe()),
+      this.providers.trade.subscribe(),
+      this.providers.data.subscribeSymbols(this.symbols),
+      ...this.providers.external.map((provider) => provider.subscribe()),
     ];
     await Promise.all(subs);
 
     this.running = true;
 
     const begins = [
-      this.dataProvider.begin(),
-      this.tradeProvider.begin(),
-      ...this.externalProviders.map((provider) => provider.begin()),
+      this.providers.trade.begin(),
+      this.providers.data.begin(),
+      ...this.providers.external.map((provider) => provider.begin()),
     ];
     await Promise.all(begins);
   }
@@ -231,122 +86,146 @@ export class TradingBot {
       return;
     }
 
+    // Business logic: if stop() throws this will result in immediate stack unwinding.
+    // TradingError logic is not applicable here.
+
     this.running = false;
 
     const ends = [
-      this.dataProvider.end(),
-      this.tradeProvider.end(),
-      ...this.externalProviders.map((provider) => provider.end()),
+      this.providers.data.end(),
+      this.providers.trade.end(),
+      ...this.providers.external.map((provider) => provider.end()),
     ];
     await Promise.all(ends);
 
     const unsubs = [
-      this.dataProvider.unsubscribeSymbols(this.symbols),
-      this.tradeProvider.unsubscribe(),
-      ...this.externalProviders.map((provider) => provider.unsubscribe()),
+      this.providers.data.unsubscribeSymbols(this.symbols),
+      this.providers.trade.unsubscribe(),
+      ...this.providers.external.map((provider) => provider.unsubscribe()),
     ];
     await Promise.all(unsubs);
 
     const disconnections = [
-      this.dataProvider.disconnect(),
-      this.tradeProvider.disconnect(),
-      ...this.externalProviders.map((provider) => provider.disconnect()),
+      this.providers.data.disconnect(),
+      this.providers.trade.disconnect(),
+      ...this.providers.external.map((provider) => provider.disconnect()),
     ];
     await Promise.all(disconnections);
-  }
-
-  /** Synchronous stop for error handling. Does not await cleanup. */
-  stopSync(): void {
-    if (!this.running) {
-      return;
-    }
-
-    this.running = false;
-
-    // Execute all stop operations synchronously without awaiting
-    // This is acceptable in error scenarios as we're shutting down
-    void Promise.all([
-      this.dataProvider.end(),
-      this.tradeProvider.end(),
-      ...this.externalProviders.map((provider) => provider.end()),
-    ]);
-
-    void Promise.all([
-      this.dataProvider.unsubscribeSymbols(this.symbols),
-      this.tradeProvider.unsubscribe(),
-      ...this.externalProviders.map((provider) => provider.unsubscribe()),
-    ]);
-
-    void Promise.all([
-      this.dataProvider.disconnect(),
-      this.tradeProvider.disconnect(),
-      ...this.externalProviders.map((provider) => provider.disconnect()),
-    ]);
   }
 
   isRunning(): boolean {
     return this.running;
   }
 
-  private onMarketEvent(event: MarketEvent): void {
-    this.snapshot.updateQuotes(event.marketData, this.position);
-    this.runMiddleware(event);
+  /**
+   * Handle market data events.
+   * Business logic: Updates snapshot with new quotes before middleware execution.
+   */
+  private async onMarketEvent(event: MarketEvent) {
+    this.queue = this.queue
+      .then(async () => {
+        this.snapshot.updateQuotes(event.marketData, this.position);
+        await this.mainLoop(event);
+      })
+      .catch((error) => this.handleError(error));
+    await this.queue;
   }
 
-  private onOrderEvent(event: OrderEvent): void {
-    if (event.fill.length > 0) {
-      const symbols: string[] = [];
-      for (const fill of event.fill) {
-        processFill(this.position, fill);
-        symbols.push(fill.symbol);
-      }
-      this.snapshot.updatePosition(symbols, this.position);
-    }
-    this.runMiddleware(event);
+  /**
+   * Handle order fill events.
+   * Business logic: Processes fills to update position and snapshot before middleware execution.
+   */
+  private async onOrderEvent(event: OrderEvent) {
+    this.queue = this.queue
+      .then(async () => {
+        if (event.fill.length > 0) {
+          const symbols = new Set<string>();
+          for (const fill of event.fill) {
+            processFill(this.position, fill);
+            symbols.add(fill.symbol);
+          }
+          this.snapshot.updatePosition(Array.from(symbols), this.position);
+        }
+        await this.mainLoop(event);
+      })
+      .catch((error) => this.handleError(error));
+    await this.queue;
   }
 
-  private onExternalEvent(event: ExternalEvent): void {
-    this.runMiddleware(event);
+  /**
+   * Handle external signal events.
+   * Business logic: External events trigger middleware without modifying position/snapshot.
+   */
+  private async onExternalEvent(event: ExternalEvent) {
+    this.queue = this.queue
+      .then(async () => {
+        await this.mainLoop(event);
+      })
+      .catch((error) => this.handleError(error)); // Could throw: processOrders
+    await this.queue;
   }
 
-  private runMiddleware(event: Event): void {
+  /**
+   * Main event processing loop.
+   *
+   * Business logic - execution model:
+   * 1. Pre-route (if exists): async pre-hook -> sync middleware chain
+   * 2. Matched routes: each runs sync middleware chain with forked context
+   * 3. Middlewares are synchronous - position/snapshot frozen during execution
+   * 4. All pending actions processed after middleware execution completes
+   */
+  private async mainLoop(event: Event) {
     if (!this.running) {
       return;
     }
 
-    const matchedRoutes = this.router.match(event);
     const ctx = new Context({
       event,
       position: this.position,
       snapshot: this.snapshot,
-      dataProvider: this.dataProvider,
-      tradeProvider: this.tradeProvider,
-      externalProviders: this.externalProviders,
+      providers: this.providers,
       logger: this.logger,
     });
 
-    for (const routeAlgorithms of matchedRoutes) {
+    // Execute pre-route (common middleware) if registered
+    const matchedPreRoute = this.router.matchPre(event);
+    if (matchedPreRoute != undefined) {
       try {
-        const middleware = [...this.preRoute, ...routeAlgorithms];
-        const composedMiddleware = compose(middleware);
-        composedMiddleware(ctx, () => {});
-        // ctx.state is not shared
-        ctx.state.clear();
+        const hook = matchedPreRoute.hook;
+        if (hook !== undefined) {
+          const async_fn = composeWithPre(hook, matchedPreRoute.strategy);
+          await async_fn(ctx, () => {});
+        } else {
+          const fn = compose(matchedPreRoute.strategy);
+          fn(ctx, () => {});
+        }
       } catch (error) {
-        this.handleError(error);
+        await this.handleError(error);
+      }
+    }
+    let pending = ctx.getPending();
+
+    // Execute matched routes with forked context for isolated execution
+    const matchedRoutes = this.router.match(event);
+    for (const strat of matchedRoutes) {
+      try {
+        const fn = compose(strat);
+        const local = ctx.clone();
+        fn(local, () => {});
+        pending = [...pending, ...local.getPending()];
+      } catch (error) {
+        await this.handleError(error);
       }
     }
 
-    // Business logic: Process pending orders after middleware chain completes, do not block, fire-and-forget
-    queueMicrotask(() => {
-      this.processOrders(ctx).catch((error: unknown) => {
-        this.handleError(error);
-      });
-    });
+    // TODO: if pending.length await this.runRiskManagement(pending)
+
+    await this.processOrders(pending);
   }
 
-  private handleError(error: unknown): void {
+  private async handleError(error: unknown) {
     if (!(error instanceof TradingError)) {
+      await this.stop();
       throw error;
     }
     this.logger.error(error.toJSON());
@@ -358,50 +237,41 @@ export class TradingBot {
         break;
       case "cancel":
         // Cancel all orders but keep running
-        this.tradeProvider.emergencyCancel();
+        this.providers.trade.emergencyCancel();
         break;
       case "halt":
         // Cancel orders and stop bot
-        this.tradeProvider.emergencyCancel();
-        this.stopSync();
+        this.providers.trade.emergencyCancel();
+        await this.stop();
         throw error;
       case "fatal":
         // Stop immediately
-        this.stopSync();
+        await this.stop();
         throw error;
     }
   }
 
-  private async processOrders(ctx: Context): Promise<void> {
-    const pending = ctx.getPending();
+  private async processOrders(pending: OrderAction[]): Promise<void> {
     if (pending.length === 0) {
       return;
     }
 
     const hasCancelAll = pending.some((action) => action.type === "cancel_all");
     if (hasCancelAll) {
-      await this.tradeProvider.cancelAllOrders();
+      await this.providers.trade.cancelAllOrders();
       return;
     }
 
-    const submit = pending
-      .filter((action) => action.type == "submit")
-      .map((action) => action.order);
-    const cancel = pending
-      .filter((action) => action.type == "cancel")
-      .map((action) => action.orderId);
-    const amend = pending
-      .filter((action) => action.type == "amend")
-      .map((action) => action.update);
+    const { submit, cancel, amend } = groupOrders(pending);
 
     if (submit.length) {
-      await this.tradeProvider.submitOrder(submit);
+      await this.providers.trade.submitOrder(submit);
     }
     if (cancel.length) {
-      await this.tradeProvider.cancelOrder(cancel);
+      await this.providers.trade.cancelOrder(cancel);
     }
     if (amend.length) {
-      await this.tradeProvider.amendOrder(amend);
+      await this.providers.trade.amendOrder(amend);
     }
   }
 }

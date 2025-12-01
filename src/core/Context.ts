@@ -7,8 +7,11 @@ import {
 } from "@junduck/trading-core";
 import type { Event } from "../types/Events.js";
 import type { DataProvider } from "../providers/DataProvider.js";
+import type { DataProviderSync } from "../providers/DataProviderSync.js";
 import type { TradeProvider } from "../providers/TradeProvider.js";
+import type { TradeProviderSync } from "../providers/TradeProviderSync.js";
 import type { ExternalProvider } from "../providers/ExternalProvider.js";
+import type { ExternalProviderSync } from "../providers/ExternalProviderSync.js";
 import type { Logger } from "./Logger.js";
 import type { Snapshot } from "./Snapshot.js";
 
@@ -36,81 +39,89 @@ export type OrderAction =
       reason: OrderActionReason;
     };
 
+export type ProviderContext =
+  | {
+      type: "async";
+      data: DataProvider;
+      trade: TradeProvider;
+      external: ExternalProvider[];
+    }
+  | {
+      type: "sync";
+      data: DataProviderSync;
+      trade: TradeProviderSync;
+      external: ExternalProviderSync[];
+    };
+
 /**
  * Context passed through the middleware chain.
  *
  * Mental model (similar to Koa):
- * - Request: {position, snapshot} - current state of the trading system
- * - Response: pendingActions[] - actions to execute (create/cancel/modify orders)
- * - Middleware can await from dataProvider and tradeProvider for extra information
+ * - Request: {position, snapshot} - current state
+ * - Response: pendingActions[] - orders to execute
+ * - Middleware can query providers for additional data
  *
- * At the end of the middleware chain, pendingActions are executed
- * (similar to how Koa handles res.body).
+ * Business logic: position/snapshot are read-only in middlewares.
+ * They only change between events (market updates, fills).
+ * This immutability enables safe context cloning for isolated route execution.
  *
- * @template E - Event type for this context (MarketEvent, OrderEvent, ExternalEvent, or Event)
- *
- * Event type is enforced at compile-time via generics.
- * Router ensures correct event type for each strategy.
+ * @template E - Event type (MarketEvent, OrderEvent, ExternalEvent, or Event)
  */
 export class Context<E extends Event = Event> {
-  /** Current event being processed (typed to specific event) */
+  /** Current event being processed */
   readonly event: E;
 
-  /** Current position state (request) */
+  /** Current position state (read-only) */
   readonly position: Position;
 
-  /** Current snapshot with market data and portfolio valuation */
+  /** Current snapshot with market data and portfolio valuation (read-only) */
   readonly snapshot: Snapshot;
 
-  /** Data provider for querying additional market data */
-  readonly dataProvider: DataProvider;
+  /** Providers (data, trade, external) */
+  readonly providers: ProviderContext;
 
-  /** Trade provider for account info and order submission */
-  readonly tradeProvider: TradeProvider;
-
-  /** External providers for external signals */
-  readonly externalProviders: ExternalProvider[];
-
-  /** Logger for middleware to log messages at different levels */
+  /** Logger for middleware */
   readonly logger: Logger;
 
   /**
-   * Event-scoped state for sharing data between middleware within this event.
-   * Each event gets a fresh state map - no cross-event races.
-   * Middleware can store calculated indicators, flags, etc.
-   *
-   * Prefer using `get()` and `set()` methods for type-safe access.
+   * Event-scoped state for sharing data between middleware.
+   * Prefer using get() and set() methods for type-safe access.
    */
-  readonly state: Map<string, unknown> = new Map();
+  readonly state: Map<string, unknown>;
 
-  /**
-   * Pending actions to be executed (response).
-   * Middleware adds actions here via createOrder(), cancelOrder(), etc.
-   * Actions are processed by the order handler at the end of the chain.
-   */
+  /** Pending actions to execute after middleware chain completes */
   private readonly pending: OrderAction[] = [];
 
   constructor(options: {
     event: E;
     position: Position;
     snapshot: Snapshot;
-    dataProvider: DataProvider;
-    tradeProvider: TradeProvider;
-    externalProviders?: ExternalProvider[];
+    providers: ProviderContext;
     logger: Logger;
+    state?: Map<string, unknown>;
   }) {
     this.event = options.event;
     this.position = options.position;
     this.snapshot = options.snapshot;
-    this.dataProvider = options.dataProvider;
-    this.tradeProvider = options.tradeProvider;
-    this.externalProviders = options.externalProviders ?? [];
+    this.providers = options.providers;
     this.logger = options.logger;
+    this.state = options.state ?? new Map();
   }
 
-  // ================================================================================
-  // State
-  // ================================================================================
+  /**
+   * Creates a shallow clone for isolated route execution.
+   * Clones state Map and pending actions array, shares position/snapshot references.
+   */
+  clone(): Context<E> {
+    return new Context<E>({
+      event: this.event,
+      position: this.position,
+      snapshot: this.snapshot,
+      providers: this.providers,
+      logger: this.logger,
+      state: new Map(this.state),
+    });
+  }
 
   /**
    * Get a value from event-scoped state with type safety.
@@ -161,10 +172,6 @@ export class Context<E extends Event = Event> {
   set(key: string, value: unknown): void {
     this.state.set(key, value);
   }
-
-  // ================================================================================
-  // Position
-  // ================================================================================
 
   /** Available cash from position */
   get cash(): number {
@@ -220,10 +227,6 @@ export class Context<E extends Event = Event> {
   hasShort(symbol: string): boolean {
     return q.hasShort(this.position, symbol);
   }
-
-  // ================================================================================
-  // Valuation
-  // ================================================================================
 
   /**
    * Get the current price for a symbol.
@@ -321,7 +324,7 @@ export class Context<E extends Event = Event> {
     quant: number,
     reason: OrderActionReason = "algo"
   ): string {
-    const id = this.tradeProvider.genOrderId();
+    const id = this.providers.trade.genOrderId();
     const order = buyOrder({
       id,
       symbol,
@@ -346,7 +349,7 @@ export class Context<E extends Event = Event> {
     quant: number,
     reason: OrderActionReason = "algo"
   ): string {
-    const id = this.tradeProvider.genOrderId();
+    const id = this.providers.trade.genOrderId();
     const order = sellOrder({
       id,
       symbol,
@@ -373,7 +376,7 @@ export class Context<E extends Event = Event> {
     price: number,
     reason: OrderActionReason = "algo"
   ): string {
-    const id = this.tradeProvider.genOrderId();
+    const id = this.providers.trade.genOrderId();
     const order = buyOrder({
       id,
       symbol,
@@ -401,7 +404,7 @@ export class Context<E extends Event = Event> {
     price: number,
     reason: OrderActionReason = "algo"
   ): string {
-    const id = this.tradeProvider.genOrderId();
+    const id = this.providers.trade.genOrderId();
     const order = sellOrder({
       id,
       symbol,

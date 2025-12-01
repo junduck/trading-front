@@ -13,13 +13,10 @@ import type {
 export type Next = () => void;
 
 /**
- * Algorithm function signature.
- * Receives a context and a next algorithm to continue the chain.
+ * Middleware function signature (synchronous).
+ * Receives a context and a next function to continue the chain.
  *
  * @template E - Event type this algorithm is compatible with
- *
- * Event type is enforced at compile-time via generics.
- * Use specific types (MarketAlgo, OrderAlgo) to restrict event compatibility.
  */
 export type Algo<E extends Event = Event> = (
   ctx: Context<E>,
@@ -51,17 +48,27 @@ export type ExternalAlgo = Algo<ExternalEvent>;
 export type UniversalAlgo = Algo<Event>;
 
 /**
+ * Pre-hook function signature (async).
+ * Runs before the sync middleware chain, typically for I/O operations.
+ * Calling next() triggers the sync middleware chain.
+ */
+export type PreHook<E extends Event = Event> = (
+  ctx: Context<E>,
+  next: Next
+) => Promise<void>;
+
+/**
  * A stack of algorithms composes a strategy for specific event
  */
 export type Strategy<E extends Event = Event> = Algo<E>[];
 
 /**
- * Compose multiple algorithms into a single algorithm function.
- * Executes algorithm in order, with each calling next() to continue.
+ * Compose multiple sync middlewares into a single function.
+ * Executes middleware in order, with each calling next() to continue.
  *
  * @template E - Event type for the composed strategy
- * @param strat - Array of algorithm to compose
- * @returns A single composed algorithm function
+ * @param strat - Array of middleware to compose
+ * @returns A single composed middleware function
  */
 export function compose<E extends Event = Event>(strat: Strategy<E>): Algo<E> {
   // Composition-time validation errors (before event loop starts)
@@ -98,5 +105,36 @@ export function compose<E extends Event = Event>(strat: Strategy<E>): Algo<E> {
     };
 
     dispatch(0);
+  };
+}
+
+/**
+ * Compose middleware with async pre-hook.
+ * Pre-hook runs first (async), then middleware chain executes (sync).
+ *
+ * @template E - Event type for the composed strategy
+ * @param pre - Async pre-hook for I/O operations
+ * @param strat - Array of sync middleware to compose
+ * @returns Async function that runs pre-hook then sync middleware chain
+ *
+ * @example
+ * const strategy = composeWithPre(
+ *   async (ctx, next) => {
+ *     await fetchData(ctx);  // async I/O
+ *     next();                // triggers sync chain
+ *   },
+ *   [algo1, algo2, algo3]    // sync middleware
+ * );
+ */
+export function composeWithPre<E extends Event = Event>(
+  pre: PreHook<E>,
+  strat: Strategy<E>
+): (ctx: Context<E>, next: Next) => Promise<void> {
+  const syncComposed = compose(strat);
+
+  return async (ctx: Context<E>, next: Next) => {
+    await pre(ctx, () => {
+      syncComposed(ctx, next);
+    });
   };
 }

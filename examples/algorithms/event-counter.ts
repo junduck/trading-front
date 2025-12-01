@@ -1,4 +1,4 @@
-import type { UniversalAlgo } from "../core/compose.js";
+import type { UniversalAlgo } from "../../src/core/compose.js";
 
 /** Options for event counter */
 export interface EventCounterOptions {
@@ -25,10 +25,10 @@ export interface EventCounterOptions {
  * @example
  * ```ts
  * // Print every 100 market events
- * agent.use(eventCounter());
+ * bot.use(eventCounter());
  *
  * // Print every 50 market events
- * agent.use(eventCounter({ interval: 50 }));
+ * bot.use(eventCounter({ interval: 50 }));
  * ```
  */
 export function eventCounter(options: EventCounterOptions = {}): UniversalAlgo {

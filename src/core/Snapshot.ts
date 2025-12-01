@@ -1,5 +1,6 @@
-import type { MarketQuote, Position } from "@junduck/trading-core";
+import type { MarketQuote, Position, OrderState } from "@junduck/trading-core";
 import { q } from "@junduck/trading-core";
+import type { OrderEvent } from "../types/Events.js";
 
 /**
  * Portfolio state snapshot combining market prices and position valuations.
@@ -14,6 +15,15 @@ export class Snapshot {
   private _equity: number = 0;
   private _totValue: number = 0;
   private _totLiab: number = 0;
+  lastSubmit: Date | undefined;
+
+  /**
+   * Map of potentially open orders.
+   * Business logic: Tracks orders that may still be working at the broker.
+   * Updated based on OrderEvent data. This is estimation only - actual state
+   * at broker may differ due to network delays, fills, or broker-side changes.
+   */
+  private readonly openMap: Map<string, OrderState> = new Map();
 
   /**
    * Get the current price for a symbol.
@@ -61,6 +71,26 @@ export class Snapshot {
    */
   get totalLiab(): number {
     return this._totLiab;
+  }
+
+  /**
+   * Get potentially open order by ID.
+   * Business logic: Returns estimated order state. Actual broker state may differ.
+   * @param orderId - Order ID to look up
+   * @returns Order state if tracked, undefined otherwise
+   */
+  getOpenOrder(orderId: string): OrderState | undefined {
+    return this.openMap.get(orderId);
+  }
+
+  /**
+   * Get all potentially open orders.
+   * Business logic: Returns snapshot of tracked open orders.
+   * This is estimation only - actual broker state may differ.
+   * @returns Array of order states
+   */
+  get openOrders(): OrderState[] {
+    return Array.from(this.openMap.values());
   }
 
   /**
@@ -132,6 +162,37 @@ export class Snapshot {
 
     // Recalculate total equity once after all symbols updated
     this.updateEquity(position.cash);
+  }
+
+  /**
+   * Update potentially open orders based on order event.
+   * Called when order state updates are received from broker.
+   *
+   * Business logic:
+   * - OPEN/PARTIAL: Order is working, add/update in openMap
+   * - FILLED/CANCELLED/REJECT: Order is terminal, remove from openMap
+   *
+   * @param event - Order event containing state updates
+   * @internal
+   */
+  updateOpen(event: OrderEvent): void {
+    for (const orderState of event.updated) {
+      // Update open orders map based on status
+      switch (orderState.status) {
+        case "OPEN":
+        case "PARTIAL":
+          // Order is still working, track it
+          this.openMap.set(orderState.id, orderState);
+          break;
+
+        case "FILLED":
+        case "CANCELLED":
+        case "REJECT":
+          // Order reached terminal state, remove from tracking
+          this.openMap.delete(orderState.id);
+          break;
+      }
+    }
   }
 
   /**

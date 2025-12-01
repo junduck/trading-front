@@ -21,9 +21,6 @@ import { EventOrchestrator, groupOrders } from "./TradingBotCommon.js";
  */
 export class TradingBot extends EventOrchestrator {
   private readonly providers: ProviderContext & { type: "async" };
-  private readonly isLocalBacktest: boolean;
-
-  private queue = Promise.resolve();
 
   constructor(opts: {
     dataProvider: DataProvider;
@@ -41,9 +38,6 @@ export class TradingBot extends EventOrchestrator {
       trade: opts.tradeProvider,
       external: opts.externalProviders ?? [],
     };
-
-    // Check once if trade provider is backtest (fills processed in pre-hook)
-    this.isLocalBacktest = (opts.tradeProvider as any).__localBacktest === true;
 
     if (opts.initialQuotes) {
       this.snapshot.updateQuotes(opts.initialQuotes, this.position);
@@ -126,13 +120,12 @@ export class TradingBot extends EventOrchestrator {
    * Business logic: Updates snapshot with new quotes before middleware execution.
    */
   private async onMarketEvent(event: MarketEvent) {
-    this.queue = this.queue
-      .then(async () => {
-        this.snapshot.updateQuotes(event.marketData, this.position);
-        await this.mainLoop(event);
-      })
-      .catch((error) => this.handleError(error));
-    await this.queue;
+    try {
+      this.snapshot.updateQuotes(event.marketData, this.position);
+      await this.mainLoop(event);
+    } catch (error) {
+      await this.handleError(error);
+    }
   }
 
   /**
@@ -140,21 +133,18 @@ export class TradingBot extends EventOrchestrator {
    * Business logic: Processes fills to update position and snapshot before middleware execution.
    */
   private async onOrderEvent(event: OrderEvent) {
-    this.queue = this.queue
-      .then(async () => {
-        // Skip fill processing for local backtest providers (fills already processed in pre-hook)
-        if (!this.isLocalBacktest && event.fill.length > 0) {
-          const symbols = new Set<string>();
-          for (const fill of event.fill) {
-            processFill(this.position, fill);
-            symbols.add(fill.symbol);
-          }
-          this.snapshot.updatePosition(Array.from(symbols), this.position);
-        }
-        await this.mainLoop(event);
-      })
-      .catch((error) => this.handleError(error));
-    await this.queue;
+    try {
+      const symbols = new Set<string>();
+      for (const fill of event.fill) {
+        processFill(this.position, fill);
+        symbols.add(fill.symbol);
+      }
+      this.snapshot.updatePosition(Array.from(symbols), this.position);
+      this.snapshot.updateOpen(event);
+      await this.mainLoop(event);
+    } catch (error) {
+      await this.handleError(error);
+    }
   }
 
   /**
@@ -162,12 +152,11 @@ export class TradingBot extends EventOrchestrator {
    * Business logic: External events trigger middleware without modifying position/snapshot.
    */
   private async onExternalEvent(event: ExternalEvent) {
-    this.queue = this.queue
-      .then(async () => {
-        await this.mainLoop(event);
-      })
-      .catch((error) => this.handleError(error)); // Could throw: processOrders
-    await this.queue;
+    try {
+      await this.mainLoop(event);
+    } catch (error) {
+      await this.handleError(event);
+    }
   }
 
   /**
@@ -220,6 +209,13 @@ export class TradingBot extends EventOrchestrator {
         pending = [...pending, ...local.getPending()];
       } catch (error) {
         await this.handleError(error);
+      }
+    }
+
+    for (const p of pending) {
+      if (p.type === "submit" || p.type === "amend") {
+        this.snapshot.lastSubmit = event.timestamp;
+        break;
       }
     }
 

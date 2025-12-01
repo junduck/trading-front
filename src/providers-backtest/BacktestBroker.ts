@@ -27,8 +27,6 @@ import type { BacktestConfig } from "../schema/backtest.js";
  * Provides tick level order filling.
  */
 export class BacktestBroker extends TradeProvider {
-  readonly __localBacktest = true as const;
-
   private config: BacktestConfig;
   private position: Position;
   private openOrders: Map<string, OrderState> = new Map(); // id -> state
@@ -60,43 +58,20 @@ export class BacktestBroker extends TradeProvider {
    *   }
    * });
    *
-   * bot.pre("market", backtest.marketPreHook).use(); // <- common route here or leave empty
+   * bot.pre("market", backtest.marketPreHook()).use(); // <- common route here or leave empty
    * ```
    */
   marketPreHook(): PreHook<MarketEvent> {
     return async (ctx, next) => {
       // ctx.event is guaranteed to be MarketEvent by type system
       // Process pending orders and get fills
-      const { updated, fills } = this.processPendingOrders(
+      await this.processPendingOrders(
         ctx.event.marketData,
         ctx.event.timestamp
       );
 
-      // Apply fills to update position/snapshot immediately (before middlewares run)
-      if (fills.length > 0) {
-        const symbols = new Set<string>();
-        for (const fill of fills) {
-          processFill(ctx.position, fill, "FIFO");
-          symbols.add(fill.symbol);
-        }
-        ctx.snapshot.updatePosition(Array.from(symbols), ctx.position);
-      }
-
       // Run market event middlewares with updated position
       next();
-
-      // After market middlewares complete, emit order event with fills (fire and forget)
-      // This allows order handlers to see fill information
-      // Note: TradingBot.onOrderEvent will skip fill processing when __localBacktest = true
-      if (updated.length > 0 && this.callback) {
-        // Don't await - let it queue for next cycle
-        this.callback({
-          type: "order",
-          timestamp: ctx.event.timestamp,
-          updated,
-          fill: fills,
-        });
-      }
     };
   }
 
@@ -116,10 +91,10 @@ export class BacktestBroker extends TradeProvider {
     return Array.from(this.openOrders.values());
   }
 
-  private notifyUpdated(states: OrderState[]): void {
+  private async notifyUpdated(states: OrderState[]) {
     if (this.running && this.callback) {
       // Fire and forget - don't await to avoid blocking
-      this.callback({
+      await this.callback({
         type: "order",
         timestamp: new Date(),
         updated: states,
@@ -152,7 +127,7 @@ export class BacktestBroker extends TradeProvider {
       }
     }
 
-    this.notifyUpdated(submitted);
+    await this.notifyUpdated(submitted);
     return submitted.length;
   }
 
@@ -186,7 +161,7 @@ export class BacktestBroker extends TradeProvider {
       updated.push(state);
     }
 
-    this.notifyUpdated(updated);
+    await this.notifyUpdated(updated);
     return updated.length;
   }
 
@@ -202,7 +177,7 @@ export class BacktestBroker extends TradeProvider {
       this.openOrders.delete(id);
     }
 
-    this.notifyUpdated(cancelled);
+    await this.notifyUpdated(cancelled);
     return cancelled.length;
   }
 
@@ -219,7 +194,7 @@ export class BacktestBroker extends TradeProvider {
     }
     this.openOrders.clear();
 
-    this.notifyUpdated(cancelled);
+    await this.notifyUpdated(cancelled);
     return count;
   }
 
@@ -266,10 +241,7 @@ export class BacktestBroker extends TradeProvider {
   // Brokerage logic
   // ============================================================================
 
-  private processPendingOrders(
-    quotes: MarketQuote[],
-    timestamp: Date
-  ): { updated: OrderState[]; fills: Fill[] } {
+  private async processPendingOrders(quotes: MarketQuote[], timestamp: Date) {
     const quoteMap = new Map(quotes.map((q) => [q.symbol, q]));
     const updated: OrderState[] = [];
     const filled: Fill[] = [];
@@ -321,7 +293,14 @@ export class BacktestBroker extends TradeProvider {
       }
     }
 
-    return { updated, fills: filled };
+    if (updated.length > 0 && this.callback) {
+      await this.callback({
+        type: "order",
+        timestamp,
+        updated,
+        fill: filled,
+      });
+    }
   }
 
   /**

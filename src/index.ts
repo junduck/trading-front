@@ -1,5 +1,6 @@
 // Core
 export { TradingBot } from "./core/TradingBot.js";
+export { TradingBotSync } from "./core/TradingBotSync.js";
 export { Context } from "./core/Context.js";
 export { Router } from "./core/Router.js";
 export { Snapshot } from "./core/Snapshot.js";

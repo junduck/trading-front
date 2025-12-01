@@ -138,6 +138,7 @@ export class TradingBotSync extends EventOrchestrator {
       }
       this.snapshot.updatePosition(symbols, this.position);
     }
+    this.snapshot.updateOpen(event);
     this.mainLoop(event);
   }
 

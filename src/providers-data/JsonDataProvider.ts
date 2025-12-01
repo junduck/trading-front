@@ -31,8 +31,14 @@ export function useUnixEpochExtractor(
 }
 
 /**
- * Simple JSON data provider that reads OHLCV data from a JSON file and emits it synchronously.
- * Designed for backtesting scenarios where historical data is replayed sequentially.
+ * JSON data provider for backtesting with historical OHLCV data.
+ *
+ * Design pattern: Synchronous callbacks with manual yielding.
+ * - Reads data from JSON file and emits market events sequentially
+ * - Yields control between events to allow order processing
+ * - Real providers (WebSocket/polling) have natural I/O backpressure
+ * - Simulated providers MUST yield to prevent event loop starvation
+ *
  * @platform node
  */
 export class JsonDataProvider extends DataProvider {
@@ -112,6 +118,11 @@ export class JsonDataProvider extends DataProvider {
           marketData: currentBatch,
         };
         this.callback(event);
+
+        // Yield control to event loop for order processing.
+        // Real providers (WebSocket, polling) have natural I/O backpressure.
+        // Simulated providers MUST yield between events for backtesting to work.
+        await new Promise((resolve) => setImmediate(resolve));
 
         currentTimestamp = recordTimestamp;
         currentBatch = [];

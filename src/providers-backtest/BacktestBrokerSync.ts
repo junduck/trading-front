@@ -13,27 +13,25 @@ import {
   rejectOrder,
   createPosition,
 } from "@junduck/trading-core/trading";
-import { TradeProvider } from "../providers/TradeProvider.js";
-import type { MarketEvent, OrderEvent } from "../types/Events.js";
-import type { PreHook } from "../core/compose.js";
+import { TradeProviderSync } from "../providers/TradeProviderSync.js";
+import type { MarketAlgo } from "../core/compose.js";
 import type { AmendAction } from "../core/Context.js";
 
 import type { BacktestConfig } from "../schema/backtest.js";
 
 /**
  * Backtesting trade provider.
- * Implements only TradeProvider interface and processes orders based on market data.
+ * Implements only TradeProviderSync interface and processes orders based on market data.
  * Use onMarketData() as first middleware to match orders with market data.
  * Provides tick level order filling.
  */
-export class BacktestBroker extends TradeProvider {
+export class BacktestBrokerSync extends TradeProviderSync {
   private config: BacktestConfig;
   private position: Position;
   private openOrders: Map<string, OrderState> = new Map(); // id -> state
   private orderIdCounter = 0;
   private connected = false;
   private running = false;
-  private callback?: (event: OrderEvent) => Promise<void>;
 
   constructor(config: BacktestConfig) {
     super();
@@ -42,10 +40,10 @@ export class BacktestBroker extends TradeProvider {
   }
 
   /**
-   * Returns pre-hook that matches orders with market data.
-   * Register this as market event pre-hook
+   * Returns middleware that matches orders with market data.
+   * Register this as first middleware in market routes.
    *
-   * @returns A market event pre-hook
+   * @returns Market algorithm middleware function (only works with market events)
    *
    * @example
    * ```ts
@@ -58,11 +56,16 @@ export class BacktestBroker extends TradeProvider {
    *   }
    * });
    *
-   * bot.pre("market", backtest.marketPreHook).use(); // <- common route here or leave empty
+   * bot.market({
+   *   strategy: [
+   *     backtest.onMarketData(),
+   *     // Your trading strategy here
+   *   ]
+   * });
    * ```
    */
-  marketPreHook(): PreHook<MarketEvent> {
-    return async (ctx, next) => {
+  onMarketData(): MarketAlgo {
+    return (ctx, next) => {
       // ctx.event is guaranteed to be MarketEvent by type system
       this.processPendingOrders(ctx.event.marketData, ctx.event.timestamp);
       next();
@@ -70,24 +73,24 @@ export class BacktestBroker extends TradeProvider {
   }
 
   // ============================================================================
-  // TradingProvider impl
+  // TradingProviderSync impl
   // ============================================================================
 
   genOrderId(): string {
     return `backtest_${this.orderIdCounter++}`;
   }
 
-  async getPosition(): Promise<Position> {
+  getPosition(): Position {
     return structuredClone(this.position);
   }
 
-  async getOpenOrders(): Promise<Order[]> {
+  getOpenOrders(): Order[] {
     return Array.from(this.openOrders.values());
   }
 
-  private async notifyUpdated(states: OrderState[]) {
+  private notifyUpdated(states: OrderState[]): void {
     if (this.running && this.callback) {
-      await this.callback({
+      this.callback({
         type: "order",
         timestamp: new Date(),
         updated: states,
@@ -107,7 +110,7 @@ export class BacktestBroker extends TradeProvider {
     this.openOrders.clear();
   }
 
-  async submitOrder(orders: Order[]): Promise<number> {
+  submitOrder(orders: Order[]): number {
     const submitted: OrderState[] = [];
     for (const order of orders) {
       if (this.openOrders.get(order.id)) {
@@ -124,7 +127,7 @@ export class BacktestBroker extends TradeProvider {
     return submitted.length;
   }
 
-  async amendOrder(updates: AmendAction[]): Promise<number> {
+  amendOrder(updates: AmendAction[]): number {
     const now = new Date();
     const updated: OrderState[] = [];
     for (const update of updates) {
@@ -158,7 +161,7 @@ export class BacktestBroker extends TradeProvider {
     return updated.length;
   }
 
-  async cancelOrder(ids: string[]): Promise<number> {
+  cancelOrder(ids: string[]): number {
     const cancelled: OrderState[] = [];
     for (const id of ids) {
       const state = this.openOrders.get(id);
@@ -174,7 +177,7 @@ export class BacktestBroker extends TradeProvider {
     return cancelled.length;
   }
 
-  async cancelAllOrders(): Promise<number> {
+  cancelAllOrders(): number {
     const count = this.openOrders.size;
     if (count === 0) return 0;
 
@@ -195,39 +198,17 @@ export class BacktestBroker extends TradeProvider {
   // BaseProvider impl
   // ============================================================================
 
-  async connect(callback: (event: OrderEvent) => Promise<void>): Promise<void> {
-    this.callback = callback;
-    this.connected = true;
-  }
-
-  async disconnect(): Promise<void> {
-    await this.end();
-    this.connected = false;
-    delete this.callback;
-  }
-
-  isConnected(): boolean {
-    return this.connected;
-  }
-
-  async subscribe(): Promise<void> {
+  subscribe(_: string[]): void {
     // No-op for backtest provider
   }
 
-  async unsubscribe(): Promise<void> {
-    await this.end();
+  // Backtest is order event-driven, no deterministic event
+  next() {
+    return undefined;
   }
 
-  async begin(): Promise<void> {
-    if (this.running) return;
-    this.running = true;
-    this.config.startDate = new Date();
-  }
-
-  async end(): Promise<void> {
-    if (!this.running) return;
-    this.running = false;
-    this.config.endDate = new Date();
+  disconnect(): void {
+    delete this.callback;
   }
 
   // ============================================================================

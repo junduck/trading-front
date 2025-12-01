@@ -93,7 +93,6 @@ export class BacktestBroker extends TradeProvider {
 
   private async notifyUpdated(states: OrderState[]) {
     if (this.running && this.callback) {
-      // Fire and forget - don't await to avoid blocking
       await this.callback({
         type: "order",
         timestamp: new Date(),

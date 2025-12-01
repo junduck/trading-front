@@ -1,5 +1,5 @@
 export abstract class BaseProviderSync<E> {
-  callback?: (event: E) => void;
+  protected callback?: (event: E) => void;
 
   // Register callback
   connect(callback: (event: E) => void): void {

@@ -1,7 +1,7 @@
 /**
- * MACD-based trading strategy with backtesting
+ * MACD-based trading strategy with synchronous backtesting
  *
- * Demonstrates composable middleware architecture:
+ * Demonstrates composable middleware architecture with synchronous execution:
  * 1. macd() - Calculates MACD indicator and writes to state.macd
  * 2. crossover() - Detects crossovers and writes to state.crossover
  * 3. Strategy - Reads state.crossover and executes trades
@@ -15,23 +15,23 @@
 
 import { macd } from "./algorithms/macd.js";
 import {
-  TradingBot,
+  TradingBotSync,
   crossover,
   maxQty,
   type CrossoverValue,
 } from "../src/index.js";
-import { BacktestBroker } from "../src/providers-backtest/BacktestBroker.js";
+import { BacktestBrokerSync } from "../src/providers-backtest/BacktestBrokerSync.js";
 import {
-  JsonDataProvider,
+  JsonDataProviderSync,
   useUnixEpochExtractor,
-} from "../src/providers-data/JsonDataProvider.js";
+} from "../src/providers-data/JsonDataProviderSync.js";
 import { q } from "@junduck/trading-core";
 
-async function main() {
-  console.log("🚀 MACD Trading Strategy Backtest\n");
+function main() {
+  console.log("🚀 MACD Trading Strategy Backtest (Sync)\n");
 
   // Create data provider loading from JSON file
-  const dataProvider = new JsonDataProvider({
+  const dataProvider = new JsonDataProviderSync({
     filePath: "fixtures/ohlcv-5m-000001.json",
     mapping: {
       timestampField: useUnixEpochExtractor("timestamp", "s"),
@@ -39,13 +39,13 @@ async function main() {
   });
 
   // Create backtest provider with initial capital
-  const tradeProvider = new BacktestBroker({
+  const tradeProvider = new BacktestBrokerSync({
     initialCash: 100000,
     commission: { rate: 0.0003 }, // 0.03% commission
   });
 
   // Create trading bot
-  const bot = new TradingBot({
+  const bot = new TradingBotSync({
     dataProvider,
     tradeProvider,
     symbols: ["000001"],
@@ -54,8 +54,8 @@ async function main() {
   let eventCount = 0;
   let tradeCount = 0;
 
-  // Regiester backtest
-  bot.pre("market", tradeProvider.marketPreHook()).use();
+  // Register backtest market data processor
+  bot.pre("market").use(tradeProvider.onMarketData());
 
   // Composable middleware pipeline:
   bot.on("market").use(macd(), crossover(), (ctx) => {
@@ -69,15 +69,6 @@ async function main() {
     const price = ctx.price("000001");
     if (!price) return;
 
-    // Print crossover signals for first few events and periodically
-    if (eventCount <= 5 || eventCount % 500 === 0) {
-      console.log(
-        `[${eventCount}] ${event.timestamp.toISOString()} Price: ¥${price.toFixed(
-          2
-        )}, Signal: ${signal.signal}, Hist: ${signal.current.toFixed(4)}`
-      );
-    }
-
     // Execute on bullish crossover: buy with all cash
     const currentPosition = ctx.holdingQty("000001");
 
@@ -86,18 +77,6 @@ async function main() {
 
       if (quantity > 0) {
         tradeCount++;
-        const cost = quantity * price;
-        console.log(
-          `[${event.timestamp.toISOString()}] 🟢 BUY SIGNAL (crossover: bullish, hist: ${signal.current.toFixed(
-            4
-          )})`
-        );
-        console.log(
-          `   Buying ${quantity} shares @ ¥${price.toFixed(
-            2
-          )} = ¥${cost.toFixed(2)}`
-        );
-
         ctx.buyMarket("000001", quantity);
       }
     }
@@ -105,30 +84,8 @@ async function main() {
     // Execute on bearish crossover: sell all holdings
     if (signal.signal === "bearish" && currentPosition > 0) {
       tradeCount++;
-      const proceeds = currentPosition * price;
-      console.log(
-        `[${event.timestamp.toISOString()}] 🔴 SELL SIGNAL (crossover: bearish, hist: ${signal.current.toFixed(
-          4
-        )})`
-      );
-      console.log(
-        `   Selling ${currentPosition} shares @ ¥${price.toFixed(
-          2
-        )} = ¥${proceeds.toFixed(2)}`
-      );
-
       ctx.sellMarket("000001", currentPosition);
     }
-  });
-
-  // Log filled orders
-  bot.on("order").use((ctx) => {
-    const event = ctx.event;
-
-    // Check if any updated order is for our symbol
-    if (!event.updated.some((state) => state.symbol === "000001")) return;
-
-    console.log(`   ✓ Position: ${ctx.holdingQty("000001")} shares`);
   });
 
   // Show initial configuration
@@ -138,11 +95,11 @@ async function main() {
 
   console.log("🎬 Running backtest...\n");
 
-  // Start backtest - runs synchronously in backtest mode
-  await bot.start();
+  // Start backtest - runs synchronously
+  bot.start();
 
   // Note: Orders submitted on the last bar cannot be matched
-  // because BacktestBroker matches orders when the next bar arrives
+  // because BacktestBrokerSync matches orders when the next bar arrives
 
   // Print final results
   const finalPosition = bot.getPosition();
@@ -172,13 +129,15 @@ async function main() {
   console.log(`   Total Equity: ¥${totalEquity.toFixed(2)}`);
   console.log(`   Total Return: ${totalReturn.toFixed(2)}%`);
 
-  await bot.stop();
+  bot.stop();
 
   console.log("\n✨ Backtest completed!\n");
 }
 
 // Run the example
-main().catch((error) => {
+try {
+  main();
+} catch (error) {
   console.error("Fatal error:", error);
   process.exit(1);
-});
+}

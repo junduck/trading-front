@@ -26,6 +26,8 @@ import type { BacktestConfig } from "../schema/backtest.js";
  * Provides tick level order filling.
  */
 export class BacktestBrokerSync extends TradeProviderSync {
+  readonly __localBacktest = true as const;
+
   private config: BacktestConfig;
   private position: Position;
   private openOrders: Map<string, OrderState> = new Map(); // id -> state
@@ -199,7 +201,7 @@ export class BacktestBrokerSync extends TradeProviderSync {
   // ============================================================================
 
   subscribe(_: string[]): void {
-    // No-op for backtest provider
+    this.running = true;
   }
 
   // Backtest is order event-driven, no deterministic event
@@ -208,6 +210,7 @@ export class BacktestBrokerSync extends TradeProviderSync {
   }
 
   disconnect(): void {
+    this.running = false;
     delete this.callback;
   }
 

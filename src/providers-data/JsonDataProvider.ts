@@ -3,31 +3,20 @@ import { readFile } from "node:fs/promises";
 import { DataProvider } from "../providers/DataProvider.js";
 import type { MarketEvent } from "../types/Events.js";
 import { TradingErrors } from "../core/TradingError.js";
+import {
+  type JsonDataMapping,
+  createTimestampExtractor,
+  createQuoteConverter,
+} from "./JsonDataCommon.js";
+
+export {
+  useDefaultTimestampExtractor,
+  useUnixEpochExtractor,
+} from "./JsonDataCommon.js";
 
 interface JsonDataProviderOptions {
   filePath: string;
-  mapping?: {
-    symbolField?: string;
-    priceField?: string;
-    timestampField?: string | ((record: any) => Date);
-  };
-}
-
-export function useDefaultTimestampExtractor(field: string) {
-  return (record: any) => {
-    return new Date(record[field]);
-  };
-}
-
-export function useUnixEpochExtractor(
-  field: string,
-  period: "s" | "ms" | "us"
-) {
-  const ratios = { s: 1000, ms: 1, us: 0.001 };
-  const ratio = ratios[period];
-  return (record: any) => {
-    return new Date((record[field] as number) * ratio);
-  };
+  mapping?: JsonDataMapping;
 }
 
 /**
@@ -43,11 +32,8 @@ export function useUnixEpochExtractor(
  */
 export class JsonDataProvider extends DataProvider {
   private filePath: string;
-  private mapping: {
-    symbolField: string;
-    priceField: string;
-  };
   private extractTimestamp: (record: any) => Date;
+  private convertToQuote: (record: any) => MarketQuote;
   private connected = false;
   private running = false;
   private callback?: (event: MarketEvent) => void;
@@ -55,16 +41,17 @@ export class JsonDataProvider extends DataProvider {
   constructor(opts: JsonDataProviderOptions) {
     super();
     this.filePath = opts.filePath;
-    this.mapping = {
-      symbolField: opts.mapping?.symbolField ?? "symbol",
-      priceField: opts.mapping?.priceField ?? "close",
-    };
 
+    const symbolField = opts.mapping?.symbolField ?? "symbol";
+    const priceField = opts.mapping?.priceField ?? "close";
     const timestampField = opts.mapping?.timestampField ?? "timestamp";
-    this.extractTimestamp =
-      typeof timestampField === "function"
-        ? timestampField
-        : useDefaultTimestampExtractor(timestampField);
+
+    this.extractTimestamp = createTimestampExtractor(timestampField);
+    this.convertToQuote = createQuoteConverter(
+      symbolField,
+      priceField,
+      this.extractTimestamp
+    );
   }
 
   async subscribeSymbols(_symbols: string[]): Promise<void> {
@@ -159,14 +146,5 @@ export class JsonDataProvider extends DataProvider {
 
   isConnected(): boolean {
     return this.connected;
-  }
-
-  private convertToQuote(record: any): MarketQuote {
-    return {
-      ...record,
-      symbol: record[this.mapping.symbolField],
-      timestamp: this.extractTimestamp(record),
-      price: record[this.mapping.priceField],
-    };
   }
 }

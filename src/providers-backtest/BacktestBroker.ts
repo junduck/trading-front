@@ -27,6 +27,8 @@ import type { BacktestConfig } from "../schema/backtest.js";
  * Provides tick level order filling.
  */
 export class BacktestBroker extends TradeProvider {
+  readonly __localBacktest = true as const;
+
   private config: BacktestConfig;
   private position: Position;
   private openOrders: Map<string, OrderState> = new Map(); // id -> state
@@ -64,8 +66,37 @@ export class BacktestBroker extends TradeProvider {
   marketPreHook(): PreHook<MarketEvent> {
     return async (ctx, next) => {
       // ctx.event is guaranteed to be MarketEvent by type system
-      this.processPendingOrders(ctx.event.marketData, ctx.event.timestamp);
+      // Process pending orders and get fills
+      const { updated, fills } = this.processPendingOrders(
+        ctx.event.marketData,
+        ctx.event.timestamp
+      );
+
+      // Apply fills to update position/snapshot immediately (before middlewares run)
+      if (fills.length > 0) {
+        const symbols = new Set<string>();
+        for (const fill of fills) {
+          processFill(ctx.position, fill, "FIFO");
+          symbols.add(fill.symbol);
+        }
+        ctx.snapshot.updatePosition(Array.from(symbols), ctx.position);
+      }
+
+      // Run market event middlewares with updated position
       next();
+
+      // After market middlewares complete, emit order event with fills (fire and forget)
+      // This allows order handlers to see fill information
+      // Note: TradingBot.onOrderEvent will skip fill processing when __localBacktest = true
+      if (updated.length > 0 && this.callback) {
+        // Don't await - let it queue for next cycle
+        this.callback({
+          type: "order",
+          timestamp: ctx.event.timestamp,
+          updated,
+          fill: fills,
+        });
+      }
     };
   }
 
@@ -85,9 +116,10 @@ export class BacktestBroker extends TradeProvider {
     return Array.from(this.openOrders.values());
   }
 
-  private async notifyUpdated(states: OrderState[]) {
+  private notifyUpdated(states: OrderState[]): void {
     if (this.running && this.callback) {
-      await this.callback({
+      // Fire and forget - don't await to avoid blocking
+      this.callback({
         type: "order",
         timestamp: new Date(),
         updated: states,
@@ -234,7 +266,10 @@ export class BacktestBroker extends TradeProvider {
   // Brokerage logic
   // ============================================================================
 
-  private processPendingOrders(quotes: MarketQuote[], timestamp: Date): void {
+  private processPendingOrders(
+    quotes: MarketQuote[],
+    timestamp: Date
+  ): { updated: OrderState[]; fills: Fill[] } {
     const quoteMap = new Map(quotes.map((q) => [q.symbol, q]));
     const updated: OrderState[] = [];
     const filled: Fill[] = [];
@@ -273,7 +308,7 @@ export class BacktestBroker extends TradeProvider {
         created: timestamp,
       });
 
-      // Update position
+      // Update broker's local position
       processFill(this.position, fill, "FIFO");
 
       // Collect updated order and fill
@@ -286,15 +321,7 @@ export class BacktestBroker extends TradeProvider {
       }
     }
 
-    // Emit single event with all updates and fills from this tick
-    if (updated.length > 0 && this.running && this.callback) {
-      this.callback({
-        type: "order",
-        timestamp,
-        updated,
-        fill: filled,
-      });
-    }
+    return { updated, fills: filled };
   }
 
   /**

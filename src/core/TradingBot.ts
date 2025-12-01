@@ -21,6 +21,7 @@ import { EventOrchestrator, groupOrders } from "./TradingBotCommon.js";
  */
 export class TradingBot extends EventOrchestrator {
   private readonly providers: ProviderContext & { type: "async" };
+  private readonly isLocalBacktest: boolean;
 
   private queue = Promise.resolve();
 
@@ -40,6 +41,9 @@ export class TradingBot extends EventOrchestrator {
       trade: opts.tradeProvider,
       external: opts.externalProviders ?? [],
     };
+
+    // Check once if trade provider is backtest (fills processed in pre-hook)
+    this.isLocalBacktest = (opts.tradeProvider as any).__localBacktest === true;
 
     if (opts.initialQuotes) {
       this.snapshot.updateQuotes(opts.initialQuotes, this.position);
@@ -138,7 +142,8 @@ export class TradingBot extends EventOrchestrator {
   private async onOrderEvent(event: OrderEvent) {
     this.queue = this.queue
       .then(async () => {
-        if (event.fill.length > 0) {
+        // Skip fill processing for local backtest providers (fills already processed in pre-hook)
+        if (!this.isLocalBacktest && event.fill.length > 0) {
           const symbols = new Set<string>();
           for (const fill of event.fill) {
             processFill(this.position, fill);

@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
     }
   },
   "files": [
@@ -39,13 +43,20 @@
   "homepage": "https://github.com/junduck/trading-front",
   "packageManager": "pnpm@10.20.0",
   "devDependencies": {
-    "@types/node": "^24.10.0",
-    "@vitest/coverage-v8": "^4.0.8",
-    "@vitest/ui": "^4.0.8",
+    "@types/node": "^24.10.1",
+    "@types/ws": "^8.18.1",
+    "@vitest/coverage-v8": "^4.0.12",
+    "@vitest/ui": "^4.0.12",
+    "pino-pretty": "^13.1.2",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.8"
+    "vitest": "^4.0.12"
   },
   "dependencies": {
-    "@junduck/trading-core": "^1.0.0"
+    "@junduck/trading-core": "^2.10.0",
+    "@junduck/trading-indi": "^0.999.0",
+    "ai": "^5.0.104",
+    "pino": "^9.14.0",
+    "ws": "^8.18.3",
+    "zod": "^4.1.13"
   }
 }

@@ -1,0 +1,150 @@
+import type { MarketQuote } from "@junduck/trading-core";
+import { readFile } from "node:fs/promises";
+import { DataProvider } from "../providers/DataProvider.js";
+import type { MarketEvent } from "../types/Events.js";
+import { TradingErrors } from "../core/TradingError.js";
+import {
+  type JsonDataMapping,
+  createTimestampExtractor,
+  createQuoteConverter,
+} from "./JsonDataCommon.js";
+
+export {
+  useDefaultTimestampExtractor,
+  useUnixEpochExtractor,
+} from "./JsonDataCommon.js";
+
+interface JsonDataProviderOptions {
+  filePath: string;
+  mapping?: JsonDataMapping;
+}
+
+/**
+ * JSON data provider for backtesting with historical OHLCV data.
+ *
+ * Design pattern: Synchronous callbacks with manual yielding.
+ * - Reads data from JSON file and emits market events sequentially
+ * - Yields control between events to allow order processing
+ * - Real providers (WebSocket/polling) have natural I/O backpressure
+ * - Simulated providers MUST yield to prevent event loop starvation
+ *
+ * @platform node
+ */
+export class JsonDataProvider extends DataProvider {
+  private filePath: string;
+  private extractTimestamp: (record: any) => Date;
+  private convertToQuote: (record: any) => MarketQuote;
+  private connected = false;
+  private running = false;
+  private callback?: (event: MarketEvent) => void;
+
+  constructor(opts: JsonDataProviderOptions) {
+    super();
+    this.filePath = opts.filePath;
+
+    const symbolField = opts.mapping?.symbolField ?? "symbol";
+    const priceField = opts.mapping?.priceField ?? "close";
+    const timestampField = opts.mapping?.timestampField ?? "timestamp";
+
+    this.extractTimestamp = createTimestampExtractor(timestampField);
+    this.convertToQuote = createQuoteConverter(
+      symbolField,
+      priceField,
+      this.extractTimestamp
+    );
+  }
+
+  async subscribeSymbols(_symbols: string[]): Promise<void> {
+    return Promise.resolve();
+  }
+
+  async subscribe(_options?: unknown): Promise<void> {
+    return Promise.resolve();
+  }
+
+  async unsubscribeSymbols(_symbols: string[]): Promise<void> {
+    return Promise.resolve();
+  }
+
+  async unsubscribe(_options?: unknown): Promise<void> {
+    await this.end();
+  }
+
+  async begin(): Promise<void> {
+    if (this.running) return;
+    if (!this.connected || !this.callback) {
+      throw TradingErrors.provider({
+        message: "Must call connect() before begin()",
+        sourceName: "JsonDataProvider",
+        severity: "halt",
+        category: "state",
+      });
+    }
+
+    this.running = true;
+
+    const content = await readFile(this.filePath, "utf-8");
+    const records = JSON.parse(content) as any[];
+
+    if (records.length === 0) {
+      return;
+    }
+
+    const firstRecord = records[0]!;
+    let currentTimestamp = this.extractTimestamp(firstRecord);
+    let currentBatch: MarketQuote[] = [];
+
+    for (const record of records) {
+      if (!this.running) break;
+
+      const recordTimestamp = this.extractTimestamp(record);
+      if (recordTimestamp.getTime() !== currentTimestamp.getTime()) {
+        const event: MarketEvent = {
+          type: "market",
+          timestamp: currentTimestamp,
+          marketData: currentBatch,
+        };
+        this.callback(event);
+
+        // Yield control to event loop for order processing.
+        // Real providers (WebSocket, polling) have natural I/O backpressure.
+        // Simulated providers MUST yield between events for backtesting to work.
+        await new Promise((resolve) => setImmediate(resolve));
+
+        currentTimestamp = recordTimestamp;
+        currentBatch = [];
+      }
+
+      currentBatch.push(this.convertToQuote(record));
+    }
+
+    if (currentBatch.length > 0 && this.running) {
+      const event: MarketEvent = {
+        type: "market",
+        timestamp: currentTimestamp,
+        marketData: currentBatch,
+      };
+      this.callback(event);
+    }
+  }
+
+  async end(): Promise<void> {
+    if (!this.running) return;
+    this.running = false;
+  }
+
+  async connect(callback: (event: MarketEvent) => void): Promise<void> {
+    this.callback = callback;
+    this.connected = true;
+  }
+
+  async disconnect(): Promise<void> {
+    await this.end();
+    this.connected = false;
+    delete this.callback;
+  }
+
+  isConnected(): boolean {
+    return this.connected;
+  }
+}

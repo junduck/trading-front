@@ -1,0 +1,436 @@
+import type {
+  MarketQuote,
+  Order,
+  OrderState,
+  Position,
+  Fill,
+  PartialOrder,
+} from "@junduck/trading-core/trading";
+import {
+  fillOrder,
+  cancelOrder,
+  acceptOrder,
+  processFill,
+  rejectOrder,
+  createPosition,
+} from "@junduck/trading-core/trading";
+import { TradeProvider } from "../providers/TradeProvider.js";
+import type { MarketEvent, OrderEvent } from "../types/Events.js";
+import type { PreHook } from "../core/compose.js";
+
+import type { BacktestConfig } from "../schema/backtest.js";
+
+/**
+ * Backtesting trade provider.
+ * Implements only TradeProvider interface and processes orders based on market data.
+ * Use onMarketData() as first middleware to match orders with market data.
+ * Provides tick level order filling.
+ */
+export class BacktestBroker extends TradeProvider {
+  private config: BacktestConfig;
+  private position: Position;
+  private openOrders: Map<string, OrderState> = new Map(); // id -> state
+  private orderIdCounter = 0;
+  private connected = false;
+  private running = false;
+  private callback?: (event: OrderEvent) => Promise<void>;
+
+  constructor(config: BacktestConfig) {
+    super();
+    this.config = config;
+    this.position = createPosition(config.initialCash);
+  }
+
+  /**
+   * Returns pre-hook that matches orders with market data.
+   * Register this as market event pre-hook
+   *
+   * @returns A market event pre-hook
+   *
+   * @example
+   * ```ts
+   * const backtest = new BacktestBroker({
+   *   initialCash: 100000,
+   *   commission: 0.001,
+   *   slippage: {
+   *     price: { fixed: 5, marketImpact: 0.01 },
+   *     volume: { maxParticipation: 0.1, allowPartialFills: true }
+   *   }
+   * });
+   *
+   * bot.pre("market", backtest.marketPreHook()).use(); // <- common route here or leave empty
+   * ```
+   */
+  marketPreHook(): PreHook<MarketEvent> {
+    return async (ctx, next) => {
+      // ctx.event is guaranteed to be MarketEvent by type system
+      // Process pending orders and get fills
+      await this.processPendingOrders(
+        ctx.event.marketData,
+        ctx.event.timestamp
+      );
+
+      // Run market event middlewares with updated position
+      next();
+    };
+  }
+
+  // ============================================================================
+  // TradingProvider impl
+  // ============================================================================
+
+  genOrderId(): string {
+    return `backtest_${this.orderIdCounter++}`;
+  }
+
+  async getPosition(): Promise<Position> {
+    return structuredClone(this.position);
+  }
+
+  async getOpenOrders(): Promise<Order[]> {
+    return Array.from(this.openOrders.values());
+  }
+
+  private async notifyUpdated(states: OrderState[]) {
+    if (this.running && this.callback) {
+      await this.callback({
+        type: "order",
+        timestamp: new Date(),
+        updated: states,
+        fill: [],
+      });
+    }
+  }
+
+  emergencyCancel(): void {
+    // Panic button - fire and forget, never throw
+    if (!this.connected) {
+      return;
+    }
+    for (const state of this.openOrders.values()) {
+      cancelOrder(state);
+    }
+    this.openOrders.clear();
+  }
+
+  async submitOrder(orders: Order[]): Promise<number> {
+    const submitted: OrderState[] = [];
+    for (const order of orders) {
+      if (this.openOrders.get(order.id)) {
+        // dup id: reject order
+        submitted.push(rejectOrder(order));
+      } else {
+        const state = acceptOrder(order);
+        submitted.push(state);
+        this.openOrders.set(order.id, state);
+      }
+    }
+
+    await this.notifyUpdated(submitted);
+    return submitted.length;
+  }
+
+  async amendOrder(updates: PartialOrder[]): Promise<number> {
+    const now = new Date();
+    const updated: OrderState[] = [];
+    for (const update of updates) {
+      const state = this.openOrders.get(update.id);
+      if (!state) {
+        continue;
+      }
+
+      if (update.quantity !== undefined) {
+        const filled = state.filledQuantity;
+        state.quantity = update.quantity;
+        state.remainingQuantity = update.quantity - filled;
+      }
+      if (update.price !== undefined) {
+        state.price = update.price;
+      }
+      if (update.stopPrice !== undefined) {
+        state.stopPrice = update.stopPrice;
+      }
+      state.modified = now;
+
+      if (state.remainingQuantity < 0) {
+        cancelOrder(state);
+        this.openOrders.delete(update.id);
+      }
+
+      updated.push(state);
+    }
+
+    await this.notifyUpdated(updated);
+    return updated.length;
+  }
+
+  async cancelOrder(ids: string[]): Promise<number> {
+    const cancelled: OrderState[] = [];
+    for (const id of ids) {
+      const state = this.openOrders.get(id);
+      if (!state) {
+        continue;
+      }
+      cancelOrder(state);
+      cancelled.push(state);
+      this.openOrders.delete(id);
+    }
+
+    await this.notifyUpdated(cancelled);
+    return cancelled.length;
+  }
+
+  async cancelAllOrders(): Promise<number> {
+    const count = this.openOrders.size;
+    if (count === 0) return 0;
+
+    const orders = Array.from(this.openOrders.values());
+    const cancelled: OrderState[] = [];
+
+    for (const order of orders) {
+      cancelOrder(order);
+      cancelled.push(order);
+    }
+    this.openOrders.clear();
+
+    await this.notifyUpdated(cancelled);
+    return count;
+  }
+
+  // ============================================================================
+  // BaseProvider impl
+  // ============================================================================
+
+  async connect(callback: (event: OrderEvent) => Promise<void>): Promise<void> {
+    this.callback = callback;
+    this.connected = true;
+  }
+
+  async disconnect(): Promise<void> {
+    await this.end();
+    this.connected = false;
+    delete this.callback;
+  }
+
+  isConnected(): boolean {
+    return this.connected;
+  }
+
+  async subscribe(): Promise<void> {
+    // No-op for backtest provider
+  }
+
+  async unsubscribe(): Promise<void> {
+    await this.end();
+  }
+
+  async begin(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    this.config.startDate = new Date();
+  }
+
+  async end(): Promise<void> {
+    if (!this.running) return;
+    this.running = false;
+    this.config.endDate = new Date();
+  }
+
+  // ============================================================================
+  // Brokerage logic
+  // ============================================================================
+
+  private async processPendingOrders(quotes: MarketQuote[], timestamp: Date) {
+    const quoteMap = new Map(quotes.map((q) => [q.symbol, q]));
+    const updated: OrderState[] = [];
+    const filled: Fill[] = [];
+
+    for (const [id, state] of Array.from(this.openOrders.entries())) {
+      const quote = quoteMap.get(state.symbol);
+      if (!quote) continue;
+
+      // Determine base fill price from order type
+      const fillPrice = this.getMatchPrice(state, quote);
+      if (fillPrice === null) continue;
+
+      // Apply volume slippage: calculate fillable quantity
+      const fillQuant = this.calculateFillQuantity(state, quote);
+      if (fillQuant === 0) continue;
+
+      // Apply price slippage: adjust fill price
+      const slippage = this.calculatePriceSlippage(
+        fillPrice,
+        fillQuant,
+        state.side,
+        quote.volume
+      );
+      const adjFillPrice = fillPrice + slippage;
+
+      // Calculate commission
+      const commission = this.calculateCommission(adjFillPrice, fillQuant);
+
+      // Fill the order
+      const fill = fillOrder({
+        state,
+        id: `fill_${this.orderIdCounter++}`,
+        price: adjFillPrice,
+        quant: fillQuant,
+        commission,
+        created: timestamp,
+      });
+
+      // Update broker's local position
+      processFill(this.position, fill, "FIFO");
+
+      // Collect updated order and fill
+      updated.push(state);
+      filled.push(fill);
+
+      // Remove from pending if fully filled
+      if (state.status === "FILLED") {
+        this.openOrders.delete(id);
+      }
+    }
+
+    if (updated.length > 0 && this.callback) {
+      await this.callback({
+        type: "order",
+        timestamp,
+        updated,
+        fill: filled,
+      });
+    }
+  }
+
+  /**
+   * Get correct match price for order, null if no match
+   */
+  private getMatchPrice(order: Order, quote: MarketQuote): number | null {
+    switch (order.type) {
+      case "MARKET":
+        return order.side === "BUY"
+          ? quote.ask ?? quote.price
+          : quote.bid ?? quote.price;
+
+      case "LIMIT":
+        if (!order.price) return null;
+        if (order.side === "BUY") {
+          const effectiveAsk = quote.ask ?? quote.price;
+          return effectiveAsk <= order.price ? effectiveAsk : null;
+        } else {
+          const effectiveBid = quote.bid ?? quote.price;
+          return effectiveBid >= order.price ? effectiveBid : null;
+        }
+
+      case "STOP":
+        if (!order.stopPrice) return null;
+        if (order.side === "BUY" && quote.price >= order.stopPrice) {
+          return quote.ask ?? quote.price;
+        }
+        if (order.side === "SELL" && quote.price <= order.stopPrice) {
+          return quote.bid ?? quote.price;
+        }
+        return null;
+
+      case "STOP_LIMIT":
+        if (!order.stopPrice || !order.price) return null;
+        const stopTriggered =
+          order.side === "BUY"
+            ? quote.price >= order.stopPrice
+            : quote.price <= order.stopPrice;
+        if (!stopTriggered) return null;
+        if (order.side === "BUY") {
+          const effectiveAsk = quote.ask ?? quote.price;
+          return effectiveAsk <= order.price ? effectiveAsk : null;
+        } else {
+          const effectiveBid = quote.bid ?? quote.price;
+          return effectiveBid >= order.price ? effectiveBid : null;
+        }
+
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Calculate maximum fillable quantity based on volume constraints
+   */
+  private calculateFillQuantity(state: OrderState, quote: MarketQuote): number {
+    const volumeConfig = this.config.slippage?.volume;
+    if (!volumeConfig || !quote.volume) {
+      return state.remainingQuantity;
+    }
+
+    // Calculate max allowed quantity based on volume participation
+    if (volumeConfig.maxParticipation) {
+      const maxQty = quote.volume * volumeConfig.maxParticipation;
+
+      if (state.remainingQuantity > maxQty) {
+        // Partial fill allowed
+        if (volumeConfig.allowPartialFills) {
+          return maxQty;
+        }
+        // Reject entire order
+        return 0;
+      }
+    }
+
+    return state.remainingQuantity;
+  }
+
+  /**
+   * Calculate price slippage adjustment
+   */
+  private calculatePriceSlippage(
+    price: number,
+    quant: number,
+    side: "BUY" | "SELL",
+    barVolume?: number
+  ): number {
+    const priceConfig = this.config.slippage?.price;
+    if (!priceConfig) return 0;
+
+    let totalSlippage = 0;
+
+    // Fixed slippage (in basis points)
+    if (priceConfig.fixed) {
+      totalSlippage += (priceConfig.fixed / 10000) * price;
+    }
+
+    // Market impact based on volume participation
+    if (priceConfig.marketImpact && barVolume && barVolume > 0) {
+      const volumePct = quant / barVolume;
+      totalSlippage += volumePct * priceConfig.marketImpact * price;
+    }
+
+    // Apply slippage direction (buy = higher, sell = lower)
+    return side === "BUY" ? totalSlippage : -totalSlippage;
+  }
+
+  /**
+   * Calculate commission for a trade
+   */
+  private calculateCommission(price: number, quant: number): number {
+    const notional = price * quant;
+    const commission = this.config.commission;
+
+    // Complex commission structure
+    let totalCommission = 0;
+    if (commission.rate) {
+      totalCommission += notional * commission.rate;
+    }
+    if (commission.perTrade) {
+      totalCommission += commission.perTrade;
+    }
+
+    // Apply min/max constraints
+    if (commission.minimum && totalCommission < commission.minimum) {
+      totalCommission = commission.minimum;
+    }
+    if (commission.maximum && totalCommission > commission.maximum) {
+      totalCommission = commission.maximum;
+    }
+
+    return totalCommission;
+  }
+}

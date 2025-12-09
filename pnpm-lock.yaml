@@ -9,17 +9,20 @@ importers:
   .:
     dependencies:
       '@junduck/trading-core':
-        specifier: ^2.7.0
-        version: 2.7.0
+        specifier: ^2.10.0
+        version: 2.10.0
       '@junduck/trading-indi':
-        specifier: ^0.998.2
-        version: 0.998.2
+        specifier: ^0.999.0
+        version: 0.999.0
       ai:
         specifier: ^5.0.104
         version: 5.0.104(zod@4.1.13)
       pino:
         specifier: ^9.14.0
         version: 9.14.0
+      ws:
+        specifier: ^8.18.3
+        version: 8.18.3
       zod:
         specifier: ^4.1.13
         version: 4.1.13
@@ -27,6 +30,9 @@ importers:
       '@types/node':
         specifier: ^24.10.1
         version: 24.10.1
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       '@vitest/coverage-v8':
         specifier: ^4.0.12
         version: 4.0.12(vitest@4.0.12)
@@ -248,11 +254,11 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@junduck/trading-core@2.7.0':
-    resolution: {integrity: sha512-XxLyo4p8GqXrXTaFsuN2dTeCwRO0pneFeX2TpYa+vx2O+8tjUrX4+X1cgmOakN4yxH4aEI1XgenZbiGSmF8KHw==}
+  '@junduck/trading-core@2.10.0':
+    resolution: {integrity: sha512-l/hvCoT9z94F320yXcKI1aYGL1So6sS3XYyqDTpqapscdnIIYtCtNXsneUBDN08lwUCImg38Kh4mrAJQAOPfIg==}
 
-  '@junduck/trading-indi@0.998.2':
-    resolution: {integrity: sha512-n6V1E45CfegMzWMl3z6TQd4jiLE28eCEnmQhIYfCwBxB857xmMzNhy5djD9jGA6TLkAsXOOQWnLra5WkK0pjOg==}
+  '@junduck/trading-indi@0.999.0':
+    resolution: {integrity: sha512-bU78RwY+EtJ9yw1xE57lD17FSZt6w5NvQtfGxOxfyIko9V6uRvZWchukR1I2rXyp7ZdTKxsFrH47tJD10PKI+g==}
 
   '@opentelemetry/api@1.9.0':
     resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
@@ -388,6 +394,9 @@ packages:
 
   '@types/node@24.10.1':
     resolution: {integrity: sha512-GNWcUTRBgIRJD5zj+Tq0fKOJ5XZajIiBroOF0yvj2bSU1WvNdYS/dn9UxwsujGW4JX06dnHyjV2y9rRaybH0iQ==}
+
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@vercel/oidc@3.0.5':
     resolution: {integrity: sha512-fnYhv671l+eTTp48gB4zEsTW/YtRgRPnkI2nT7x6qw5rkI1Lq2hTmQIpHPgyThI0znLK+vX2n9XxKdXZ7BUbbw==}
@@ -792,6 +801,18 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
+  ws@8.18.3:
+    resolution: {integrity: sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   zod@4.1.13:
     resolution: {integrity: sha512-AvvthqfqrAhNH9dnfmrfKzX5upOdjUVJYFqNSlkmGf64gRaTzlPwz99IHYnVs28qYAybvAlBV+H7pn0saFY4Ig==}
 
@@ -917,11 +938,11 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@junduck/trading-core@2.7.0': {}
+  '@junduck/trading-core@2.10.0': {}
 
-  '@junduck/trading-indi@0.998.2':
+  '@junduck/trading-indi@0.999.0':
     dependencies:
-      '@junduck/trading-core': 2.7.0
+      '@junduck/trading-core': 2.10.0
       zod: 4.1.13
 
   '@opentelemetry/api@1.9.0': {}
@@ -1010,6 +1031,10 @@ snapshots:
   '@types/node@24.10.1':
     dependencies:
       undici-types: 7.16.0
+
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 24.10.1
 
   '@vercel/oidc@3.0.5': {}
 
@@ -1425,5 +1450,7 @@ snapshots:
       stackback: 0.0.2
 
   wrappy@1.0.2: {}
+
+  ws@8.18.3: {}
 
   zod@4.1.13: {}

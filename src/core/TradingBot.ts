@@ -1,9 +1,10 @@
-import { type MarketQuote, processFill } from "@junduck/trading-core/trading";
+import { type MarketQuote } from "@junduck/trading-core/trading";
 import type {
   Event,
   MarketEvent,
   OrderEvent,
   ExternalEvent,
+  BaseEvent,
 } from "../types/Events.js";
 import type { DataProvider } from "../providers/DataProvider.js";
 import type { TradeProvider } from "../providers/TradeProvider.js";
@@ -40,7 +41,7 @@ export class TradingBot extends EventOrchestrator {
     };
 
     if (opts.initialQuotes) {
-      this.snapshot.updateQuotes(opts.initialQuotes, this.position);
+      this.snapshot.updateQuotes(opts.initialQuotes);
     }
   }
 
@@ -51,15 +52,15 @@ export class TradingBot extends EventOrchestrator {
     }
 
     const connections = [
-      this.providers.trade.connect(this.onOrderEvent.bind(this)),
-      this.providers.data.connect(this.onMarketEvent.bind(this)),
+      this.providers.trade.connect(this.onEvent.bind(this)),
+      this.providers.data.connect(this.onEvent.bind(this)),
       ...this.providers.external.map((provider) =>
-        provider.connect(this.onExternalEvent.bind(this))
+        provider.connect(this.onEvent.bind(this))
       ),
     ];
     await Promise.all(connections);
 
-    this.position = await this.providers.trade.getPosition();
+    this.snapshot.position = await this.providers.trade.getPosition();
 
     const subs = [
       this.providers.trade.subscribe(),
@@ -115,47 +116,26 @@ export class TradingBot extends EventOrchestrator {
     return this.running;
   }
 
-  /**
-   * Handle market data events.
-   * Business logic: Updates snapshot with new quotes before middleware execution.
-   */
-  private async onMarketEvent(event: MarketEvent) {
+  private async onEvent(event: BaseEvent) {
     try {
-      this.snapshot.updateQuotes(event.marketData, this.position);
-      await this.mainLoop(event);
-    } catch (error) {
-      await this.handleError(error);
-    }
-  }
-
-  /**
-   * Handle order fill events.
-   * Business logic: Processes fills to update position and snapshot before middleware execution.
-   */
-  private async onOrderEvent(event: OrderEvent) {
-    try {
-      const symbols = new Set<string>();
-      for (const fill of event.fill) {
-        processFill(this.position, fill);
-        symbols.add(fill.symbol);
+      switch (event.type) {
+        case "market":
+          const e = event as MarketEvent;
+          this.snapshot.updateQuotes(e.marketData);
+          await this.mainLoop(e);
+          break;
+        case "order":
+          const o = event as OrderEvent;
+          this.snapshot.updatePosition(o.updated, o.fill);
+          await this.mainLoop(o);
+          break;
+        case "external":
+          const x = event as ExternalEvent;
+          await this.mainLoop(x);
+          break;
       }
-      this.snapshot.updatePosition(Array.from(symbols), this.position);
-      this.snapshot.updateOpen(event);
-      await this.mainLoop(event);
     } catch (error) {
       await this.handleError(error);
-    }
-  }
-
-  /**
-   * Handle external signal events.
-   * Business logic: External events trigger middleware without modifying position/snapshot.
-   */
-  private async onExternalEvent(event: ExternalEvent) {
-    try {
-      await this.mainLoop(event);
-    } catch (error) {
-      await this.handleError(event);
     }
   }
 
@@ -175,7 +155,6 @@ export class TradingBot extends EventOrchestrator {
 
     const ctx = new Context({
       event,
-      position: this.position,
       snapshot: this.snapshot,
       providers: this.providers,
       logger: this.logger,

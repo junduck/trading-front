@@ -4,6 +4,7 @@ import type {
   OrderState,
   Position,
   Fill,
+  PartialOrder,
 } from "@junduck/trading-core/trading";
 import {
   fillOrder,
@@ -15,7 +16,6 @@ import {
 } from "@junduck/trading-core/trading";
 import { TradeProviderSync } from "../providers/TradeProviderSync.js";
 import type { MarketAlgo } from "../core/compose.js";
-import type { AmendAction } from "../core/Context.js";
 
 import type { BacktestConfig } from "../schema/backtest.js";
 
@@ -127,7 +127,7 @@ export class BacktestBrokerSync extends TradeProviderSync {
     return submitted.length;
   }
 
-  amendOrder(updates: AmendAction[]): number {
+  amendOrder(updates: PartialOrder[]): number {
     const now = new Date();
     const updated: OrderState[] = [];
     for (const update of updates) {

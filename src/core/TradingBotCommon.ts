@@ -1,4 +1,4 @@
-import { createPosition, type Position } from "@junduck/trading-core/trading";
+import { type Position } from "@junduck/trading-core/trading";
 import type {
   MarketEvent,
   OrderEvent,
@@ -117,7 +117,6 @@ export class EventOrchestrator {
   protected readonly logger: Logger;
 
   protected readonly symbols: string[];
-  protected position: Position = createPosition();
   protected snapshot: Snapshot = new Snapshot();
   protected running = false;
 
@@ -127,12 +126,12 @@ export class EventOrchestrator {
   }
 
   /** Get current position (readonly clone) */
-  getPosition(): Position {
-    return this.position;
+  getPosition(): Readonly<Position> {
+    return this.snapshot.position;
   }
 
   /** Get current snapshot */
-  getSnapshot(): Snapshot {
+  getSnapshot(): Readonly<Snapshot> {
     return this.snapshot;
   }
 

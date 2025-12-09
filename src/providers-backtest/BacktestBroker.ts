@@ -4,6 +4,7 @@ import type {
   OrderState,
   Position,
   Fill,
+  PartialOrder,
 } from "@junduck/trading-core/trading";
 import {
   fillOrder,
@@ -16,7 +17,6 @@ import {
 import { TradeProvider } from "../providers/TradeProvider.js";
 import type { MarketEvent, OrderEvent } from "../types/Events.js";
 import type { PreHook } from "../core/compose.js";
-import type { AmendAction } from "../core/Context.js";
 
 import type { BacktestConfig } from "../schema/backtest.js";
 
@@ -130,7 +130,7 @@ export class BacktestBroker extends TradeProvider {
     return submitted.length;
   }
 
-  async amendOrder(updates: AmendAction[]): Promise<number> {
+  async amendOrder(updates: PartialOrder[]): Promise<number> {
     const now = new Date();
     const updated: OrderState[] = [];
     for (const update of updates) {

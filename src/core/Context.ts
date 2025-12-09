@@ -2,8 +2,8 @@ import {
   q,
   buyOrder,
   sellOrder,
-  type Position,
   type Order,
+  type PartialOrder,
 } from "@junduck/trading-core";
 import type { Event } from "../types/Events.js";
 import type { DataProvider } from "../providers/DataProvider.js";
@@ -14,8 +14,6 @@ import type { ExternalProvider } from "../providers/ExternalProvider.js";
 import type { ExternalProviderSync } from "../providers/ExternalProviderSync.js";
 import type { Logger } from "./Logger.js";
 import type { Snapshot } from "./Snapshot.js";
-
-export type AmendAction = Partial<Order> & Pick<Order, "id">;
 
 /**
  * Reason for an order action.
@@ -35,7 +33,7 @@ export type OrderAction =
   | { type: "cancel_all"; reason: OrderActionReason }
   | {
       type: "amend";
-      update: AmendAction;
+      update: PartialOrder;
       reason: OrderActionReason;
     };
 
@@ -71,9 +69,6 @@ export class Context<E extends Event = Event> {
   /** Current event being processed */
   readonly event: E;
 
-  /** Current position state (read-only) */
-  readonly position: Position;
-
   /** Current snapshot with market data and portfolio valuation (read-only) */
   readonly snapshot: Snapshot;
 
@@ -94,14 +89,12 @@ export class Context<E extends Event = Event> {
 
   constructor(options: {
     event: E;
-    position: Position;
     snapshot: Snapshot;
     providers: ProviderContext;
     logger: Logger;
     state?: Map<string, unknown>;
   }) {
     this.event = options.event;
-    this.position = options.position;
     this.snapshot = options.snapshot;
     this.providers = options.providers;
     this.logger = options.logger;
@@ -115,7 +108,6 @@ export class Context<E extends Event = Event> {
   clone(): Context<E> {
     return new Context<E>({
       event: this.event,
-      position: this.position,
       snapshot: this.snapshot,
       providers: this.providers,
       logger: this.logger,
@@ -175,57 +167,57 @@ export class Context<E extends Event = Event> {
 
   /** Available cash from position */
   get cash(): number {
-    return this.position.cash;
+    return this.snapshot.position.cash;
   }
 
   /** Total commission paid */
   get totalCommission(): number {
-    return this.position.totalCommission;
+    return this.snapshot.position.totalCommission;
   }
 
   /** Total realised profit and loss */
   get realisedPnL(): number {
-    return this.position.realisedPnL;
+    return this.snapshot.position.realisedPnL;
   }
 
   holdingQty(symbol: string): number {
-    return q.qty(this.position, symbol);
+    return q.qty(this.snapshot.position, symbol);
   }
 
   holdingCost(symbol: string): number {
-    return q.cost(this.position, symbol);
+    return q.cost(this.snapshot.position, symbol);
   }
 
   longQty(symbol: string): number {
-    return q.longQty(this.position, symbol);
+    return q.longQty(this.snapshot.position, symbol);
   }
 
   shortQty(symbol: string): number {
-    return q.shortQty(this.position, symbol);
+    return q.shortQty(this.snapshot.position, symbol);
   }
 
   longCost(symbol: string): number {
-    return q.longCost(this.position, symbol);
+    return q.longCost(this.snapshot.position, symbol);
   }
 
   shortProceeds(symbol: string): number {
-    return q.shortProceeds(this.position, symbol);
+    return q.shortProceeds(this.snapshot.position, symbol);
   }
 
   longPnL(symbol: string): number {
-    return q.longPnL(this.position, symbol);
+    return q.longPnL(this.snapshot.position, symbol);
   }
 
   shortPnL(symbol: string): number {
-    return q.shortPnL(this.position, symbol);
+    return q.shortPnL(this.snapshot.position, symbol);
   }
 
   hasHolding(symbol: string): boolean {
-    return q.hasLong(this.position, symbol);
+    return q.hasLong(this.snapshot.position, symbol);
   }
 
   hasShort(symbol: string): boolean {
-    return q.hasShort(this.position, symbol);
+    return q.hasShort(this.snapshot.position, symbol);
   }
 
   /**
@@ -297,7 +289,7 @@ export class Context<E extends Event = Event> {
    * @param reason - Reason for amending the order
    * @returns order id
    */
-  amendOrder(update: AmendAction, reason: OrderActionReason = "algo") {
+  amendOrder(update: PartialOrder, reason: OrderActionReason = "algo") {
     this.pending.push({ type: "amend", update, reason });
   }
 

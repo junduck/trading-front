@@ -1,6 +1,10 @@
-import type { MarketQuote, Position, OrderState } from "@junduck/trading-core";
-import { q } from "@junduck/trading-core";
-import type { OrderEvent } from "../types/Events.js";
+import type {
+  MarketQuote,
+  Position,
+  OrderState,
+  Fill,
+} from "@junduck/trading-core";
+import { createPosition, processFill, q } from "@junduck/trading-core";
 
 /**
  * Portfolio state snapshot combining market prices and position valuations.
@@ -15,7 +19,32 @@ export class Snapshot {
   private _equity: number = 0;
   private _totValue: number = 0;
   private _totLiab: number = 0;
+  private _position: Position = createPosition();
+
   lastSubmit: Date | undefined;
+
+  get position(): Readonly<Position> {
+    return this._position;
+  }
+
+  set position(pos: Position) {
+    this._position = structuredClone(pos);
+    // Recaculate valuations based on new position
+    if (this._position.long) {
+      for (const [symbol, longPos] of this._position.long) {
+        const price = this.priceMap.get(symbol) ?? 0;
+        this.valueMap.set(symbol, longPos.quantity * price);
+      }
+    }
+    if (this._position.short) {
+      for (const [symbol, shortPos] of this._position.short) {
+        const price = this.priceMap.get(symbol) ?? 0;
+        this.liabMap.set(symbol, shortPos.quantity * price);
+      }
+    }
+    // Recalculate equity when position is set
+    this.updateEquity();
+  }
 
   /**
    * Map of potentially open orders.
@@ -98,10 +127,9 @@ export class Snapshot {
    * Called when new market price information arrives.
    *
    * @param quotes - Array of market quotes with updated prices
-   * @param position - Current position state
    * @internal
    */
-  updateQuotes(quotes: MarketQuote[], position: Position): void {
+  updateQuotes(quotes: MarketQuote[]): void {
     // Update price map and recalculate valuations only for affected symbols
     for (const quote of quotes) {
       const symbol = quote.symbol;
@@ -115,20 +143,20 @@ export class Snapshot {
       this.priceMap.set(symbol, newPrice);
 
       // Update market value for long positions
-      if (position.long && position.long.has(symbol)) {
-        const longPos = position.long.get(symbol)!;
+      if (this._position.long && this._position.long.has(symbol)) {
+        const longPos = this._position.long.get(symbol)!;
         this.valueMap.set(symbol, longPos.quantity * newPrice);
       }
 
       // Update liability for short positions
-      if (position.short && position.short.has(symbol)) {
-        const shortPos = position.short.get(symbol)!;
+      if (this._position.short && this._position.short.has(symbol)) {
+        const shortPos = this._position.short.get(symbol)!;
         this.liabMap.set(symbol, shortPos.quantity * newPrice);
       }
     }
 
     // Recalculate total equity
-    this.updateEquity(position.cash);
+    this.updateEquity();
   }
 
   /**
@@ -136,13 +164,22 @@ export class Snapshot {
    * Called when positions change due to order execution.
    *
    * @param symbols - Updated symbols (from fills)
-   * @param position - Updated position state
    * @internal
    */
-  updatePosition(symbols: string[], position: Position): void {
+  updatePosition(updated: OrderState[], fill: Fill[]): void {
+    const symbolSet = new Set<string>();
+
+    // Update position state based on fills
+    for (const f of fill) {
+      symbolSet.add(f.symbol);
+      processFill(this._position, f);
+    }
+
+    const symbols = Array.from(symbolSet);
+
     for (const symbol of symbols) {
       // Update market value for long positions
-      const longQty = q.longQty(position, symbol);
+      const longQty = q.longQty(this._position, symbol);
       if (longQty) {
         const price = this.price(symbol);
         this.valueMap.set(symbol, longQty * price);
@@ -151,7 +188,7 @@ export class Snapshot {
       }
 
       // Update liability for short positions
-      const shortQty = q.shortQty(position, symbol);
+      const shortQty = q.shortQty(this._position, symbol);
       if (shortQty) {
         const price = this.price(symbol);
         this.liabMap.set(symbol, shortQty * price);
@@ -160,8 +197,11 @@ export class Snapshot {
       }
     }
 
+    // Update open orders based on updated states
+    this.updateOpenOrder(updated);
+
     // Recalculate total equity once after all symbols updated
-    this.updateEquity(position.cash);
+    this.updateEquity();
   }
 
   /**
@@ -172,24 +212,24 @@ export class Snapshot {
    * - OPEN/PARTIAL: Order is working, add/update in openMap
    * - FILLED/CANCELLED/REJECT: Order is terminal, remove from openMap
    *
-   * @param event - Order event containing state updates
+   * @param updated - Array of updated order states
    * @internal
    */
-  updateOpen(event: OrderEvent): void {
-    for (const orderState of event.updated) {
+  updateOpenOrder(updated: OrderState[]): void {
+    for (const state of updated) {
       // Update open orders map based on status
-      switch (orderState.status) {
+      switch (state.status) {
         case "OPEN":
         case "PARTIAL":
           // Order is still working, track it
-          this.openMap.set(orderState.id, orderState);
+          this.openMap.set(state.id, state);
           break;
 
         case "FILLED":
         case "CANCELLED":
         case "REJECT":
           // Order reached terminal state, remove from tracking
-          this.openMap.delete(orderState.id);
+          this.openMap.delete(state.id);
           break;
       }
     }
@@ -199,9 +239,8 @@ export class Snapshot {
    * Calculate total portfolio equity.
    * Equity = cash + market value of longs - market value of shorts
    *
-   * @param cash - Current cash amount
    */
-  private updateEquity(cash: number): void {
+  private updateEquity(): void {
     this._totValue = Array.from(this.valueMap.values()).reduce(
       (sum, value) => sum + value,
       0
@@ -212,6 +251,6 @@ export class Snapshot {
       0
     );
 
-    this._equity = cash + this._totValue - this._totLiab;
+    this._equity = this._position.cash + this._totValue - this._totLiab;
   }
 }

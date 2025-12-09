@@ -1,7 +1,10 @@
 import { BaseProviderSync } from "./BaseProviderSync.js";
 import type { OrderEvent } from "../types/Events.js";
-import type { Order, Position } from "@junduck/trading-core/trading";
-import type { AmendAction } from "../core/Context.js";
+import type {
+  Order,
+  PartialOrder,
+  Position,
+} from "@junduck/trading-core/trading";
 
 export abstract class TradeProviderSync extends BaseProviderSync<OrderEvent> {
   /**
@@ -58,7 +61,7 @@ export abstract class TradeProviderSync extends BaseProviderSync<OrderEvent> {
    * @param updates - Order fields to update
    * @returns Number of orders successfully amended
    */
-  abstract amendOrder(updates: AmendAction[]): number;
+  abstract amendOrder(updates: PartialOrder[]): number;
 
   /**
    * Cancel a pending order.

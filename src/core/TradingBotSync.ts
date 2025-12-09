@@ -1,4 +1,4 @@
-import { type MarketQuote, processFill } from "@junduck/trading-core/trading";
+import { type MarketQuote } from "@junduck/trading-core/trading";
 import type {
   Event,
   MarketEvent,
@@ -44,7 +44,7 @@ export class TradingBotSync extends EventOrchestrator {
     };
 
     if (opts.initialQuotes) {
-      this.snapshot.updateQuotes(opts.initialQuotes, this.position);
+      this.snapshot.updateQuotes(opts.initialQuotes);
     }
   }
 
@@ -74,7 +74,7 @@ export class TradingBotSync extends EventOrchestrator {
       ext.subscribe(this.symbols);
     }
 
-    this.position = this.providers.trade.getPosition();
+    this.snapshot.position = this.providers.trade.getPosition();
 
     // we don't have begin here, sync bot itself is the event orchestrator
 
@@ -125,20 +125,12 @@ export class TradingBotSync extends EventOrchestrator {
   }
 
   private onMarketEvent(event: MarketEvent) {
-    this.snapshot.updateQuotes(event.marketData, this.position);
+    this.snapshot.updateQuotes(event.marketData);
     this.mainLoop(event);
   }
 
   private onOrderEvent(event: OrderEvent) {
-    if (event.fill.length > 0) {
-      const symbols: string[] = [];
-      for (const fill of event.fill) {
-        processFill(this.position, fill);
-        symbols.push(fill.symbol);
-      }
-      this.snapshot.updatePosition(symbols, this.position);
-    }
-    this.snapshot.updateOpen(event);
+    this.snapshot.updatePosition(event.updated, event.fill);
     this.mainLoop(event);
   }
 
@@ -153,7 +145,6 @@ export class TradingBotSync extends EventOrchestrator {
 
     const ctx = new Context({
       event,
-      position: this.position,
       snapshot: this.snapshot,
       providers: this.providers,
       logger: this.logger,

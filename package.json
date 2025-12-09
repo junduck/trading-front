@@ -44,6 +44,7 @@
   "packageManager": "pnpm@10.20.0",
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.0.12",
     "@vitest/ui": "^4.0.12",
     "pino-pretty": "^13.1.2",
@@ -51,10 +52,11 @@
     "vitest": "^4.0.12"
   },
   "dependencies": {
-    "@junduck/trading-core": "^2.7.0",
-    "@junduck/trading-indi": "^0.998.2",
+    "@junduck/trading-core": "^2.10.0",
+    "@junduck/trading-indi": "^0.999.0",
     "ai": "^5.0.104",
     "pino": "^9.14.0",
+    "ws": "^8.18.3",
     "zod": "^4.1.13"
   }
 }

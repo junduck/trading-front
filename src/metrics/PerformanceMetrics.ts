@@ -298,17 +298,17 @@ export function performanceTracker(config: PerformanceConfig): OrderAlgo {
 
       // Use equity from context (calculated by TradingBot on market/order events)
       const equity = ctx.equity;
-      const marketValue = equity - ctx.position.cash;
+      const marketValue = equity - ctx.cash;
 
       // Update metrics and write snapshot to context state
       const snapshot = metrics.update(
         ctx.event.timestamp,
         equity,
-        ctx.position.cash,
+        ctx.cash,
         marketValue,
         tradeCount,
-        ctx.position.totalCommission,
-        ctx.position.realisedPnL
+        ctx.totalCommission,
+        ctx.realisedPnL
       );
 
       // Write to state for downstream middleware to access
